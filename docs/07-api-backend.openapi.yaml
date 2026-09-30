@@ -1,0 +1,2008 @@
+openapi: 3.1.0
+info:
+  title: Padel Court Booking — Backend API
+  version: 1.0-batch7
+  description: >-
+    API backend Sistem Penyewaan Lapangan Padel (Next.js Route Handlers +
+    Drizzle ORM + Neon PostgreSQL). Dokumen manusia: docs/07-api-backend.md.
+    Versi mengikuti batch backend: 1.0-batch7 (+ laporan & CSV, seluruh batch selesai).
+summary: API backend MVP Padel Court Booking
+servers:
+  - url: /api
+    description: Same-origin (Next.js App Router)
+tags:
+  - name: Public
+    description: Tanpa autentikasi (kesehatan, katalog, ketersediaan slot).
+  - name: Pelanggan–Auth
+    description: OTP nomor HP + sesi padel_session.
+  - name: Pelanggan–Booking
+    description: Buat & baca booking (perlu sesi padel_session, kecuali detail via kode).
+  - name: Admin–Auth
+    description: Login sesi admin (cookie HttpOnly).
+  - name: Admin–Jadwal
+    description: Jadwal harian + penutupan lapangan (perlu sesi admin).
+  - name: Admin–Monitoring
+    description: Daftar booking, aksi remediasi, ringkasan harian (perlu sesi admin).
+  - name: Admin–Lapangan
+    description: Konfigurasi lapangan (perlu sesi admin).
+  - name: Admin–Laporan
+    description: Rekap operasional JSON + ekspor CSV (F11, perlu sesi admin).
+  - name: Pembayaran
+    description: Charge QRIS, polling status, webhook gateway (F4).
+  - name: Tiket
+    description: Tiket publik via kode + check-in admin (F5).
+  - name: Cron
+    description: Endpoint internal terjadwal (perlu CRON_SECRET).
+paths:
+  /health:
+    get:
+      tags: [Public]
+      summary: Cek koneksi database
+      operationId: getHealth
+      responses:
+        '200':
+          description: Server & DB sehat
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                ok: true
+                db: connected
+  /courts:
+    get:
+      tags: [Public]
+      summary: Daftar lapangan aktif + jam operasional hari ini
+      operationId: listCourts
+      responses:
+        '200':
+          description: Daftar lapangan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, courts]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  courts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Court'
+              example:
+                ok: true
+                courts:
+                  - id: 1
+                    name: Lapangan 1
+                    hourlyPrice: 35000
+                    isActive: true
+                    isIndoor: false
+                    description: Outdoor, pasir sintetis
+                    openHour: 7
+                    closeHour: 23
+  /slots:
+    get:
+      tags: [Public]
+      summary: Jadwal ketersediaan 1 tanggal (F1)
+      operationId: getDaySlots
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: '2026-10-05'
+          description: Tanggal format YYYY-MM-DD
+      responses:
+        '200':
+          description: Jadwal hari tersebut
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, schedule]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  schedule:
+                    $ref: '#/components/schemas/DaySchedule'
+              example:
+                ok: true
+                schedule:
+                  date: '2026-10-05'
+                  dayOfWeek: 1
+                  courts:
+                    - id: 1
+                      name: Lapangan 1
+                      hourlyPrice: 35000
+                      isActive: true
+                      isIndoor: false
+                      description: Outdoor, pasir sintetis
+                      openHour: 7
+                      closeHour: 23
+                  slots:
+                    - courtId: 1
+                      hour: 7
+                      status: kosong
+                    - courtId: 1
+                      hour: 8
+                      status: kosong
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /otp/request:
+    post:
+      tags: [Pelanggan–Auth]
+      summary: Minta kode OTP 6 digit (F3, driver mock)
+      operationId: otpRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  example: '081234567890'
+                name:
+                  type: string
+                  example: Raka Pratama
+                  description: Disimpan saat akun auto-create di verify
+      responses:
+        '201':
+          description: 'OTP dibuat (mock: kode di log server; debugCode hanya non-produksi)'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, sentTo, expiresInSeconds]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  sentTo:
+                    type: string
+                    example: '6281234567890'
+                  expiresInSeconds:
+                    type: integer
+                    example: 300
+                  debugCode:
+                    type: string
+                    example: '914285'
+              example:
+                ok: true
+                sentTo: '6281234567890'
+                expiresInSeconds: 300
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /otp/verify:
+    post:
+      tags: [Pelanggan–Auth]
+      summary: Verifikasi OTP → auto-create akun + cookie sesi (F3)
+      operationId: otpVerify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone:
+                  type: string
+                  example: '081234567890'
+                code:
+                  type: string
+                  example: '914285'
+                name:
+                  type: string
+                  example: Raka Pratama
+      responses:
+        '200':
+          description: Terverifikasi; cookie padel_session diset via Set-Cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, user]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  user:
+                    type: object
+                    required: [id, name, phone]
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      name:
+                        type: string
+                      phone:
+                        type: string
+              example:
+                ok: true
+                user:
+                  id: 1
+                  name: Raka Uji
+                  phone: '6281234567890'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /bookings:
+    post:
+      tags: [Pelanggan–Booking]
+      summary: Buat booking online — tahan slot (F2, menunggu_pembayaran +15 mnt)
+      operationId: createBooking
+      security:
+        - customerCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [courtId, date, hours]
+              properties:
+                courtId:
+                  type: integer
+                  example: 2
+                date:
+                  type: string
+                  format: date
+                  example: '2026-10-06'
+                hours:
+                  type: array
+                  items:
+                    type: integer
+                  example: [18, 19]
+                  description: Wajib berurutan dalam satu lapangan
+      responses:
+        '201':
+          description: Slot tertahan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, booking, payment]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  booking:
+                    $ref: '#/components/schemas/BookingCreated'
+                  payment:
+                    $ref: '#/components/schemas/PaymentRef'
+              example:
+                ok: true
+                booking:
+                  code: PD-VKB6WV
+                  courtId: 2
+                  courtName: Lapangan 2
+                  date: '2026-10-06'
+                  hours: [18, 19]
+                  status: menunggu_pembayaran
+                  subtotal: 70000
+                  expiresAt: '2026-09-29T18:09:50.197Z'
+                payment:
+                  orderId: ORD-PD-VKB6WV
+                  amount: 70000
+                  status: pending
+                  expiresAt: '2026-09-29T18:09:50.197Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /bookings/{code}:
+    get:
+      tags: [Pelanggan–Booking]
+      summary: Detail booking via kode (publik, untuk konfirmasi & tiket)
+      operationId: getBooking
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            example: PD-VKB6WV
+      responses:
+        '200':
+          description: Detail booking
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, booking]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  booking:
+                    $ref: '#/components/schemas/BookingDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /me/bookings:
+    get:
+      tags: [Pelanggan–Booking]
+      summary: Riwayat booking milik sesi (untuk /riwayat)
+      operationId: myBookings
+      security:
+        - customerCookie: []
+      responses:
+        '200':
+          description: Daftar booking milik sesi
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, bookings]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  bookings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MyBooking'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/login:
+    post:
+      tags: [Admin–Auth]
+      summary: Login admin (scrypt + sesi DB)
+      operationId: adminLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: admin
+                password:
+                  type: string
+                  example: admin123
+      responses:
+        '200':
+          description: Login berhasil; cookie sesi diset via Set-Cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: padelclub_admin=<token>; Path=/; HttpOnly; SameSite=Lax
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, admin]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  admin:
+                    $ref: '#/components/schemas/Admin'
+              example:
+                ok: true
+                admin:
+                  id: 1
+                  username: admin
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /admin/logout:
+    post:
+      tags: [Admin–Auth]
+      summary: Logout admin (hapus sesi + cookie)
+      operationId: adminLogout
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Logout berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, loggedOut]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  loggedOut:
+                    type: boolean
+                    example: true
+  /admin/me:
+    get:
+      tags: [Admin–Auth]
+      summary: Profil admin dari sesi saat ini
+      operationId: adminMe
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Profil admin
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, admin]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  admin:
+                    $ref: '#/components/schemas/Admin'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/schedule:
+    get:
+      tags: [Admin–Jadwal]
+      summary: Jadwal harian + detail booking untuk modal (F7 read-model)
+      operationId: adminSchedule
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: '2026-10-05'
+      responses:
+        '200':
+          description: Jadwal + daftar booking tanggal tersebut
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, schedule, bookings]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  schedule:
+                    $ref: '#/components/schemas/DaySchedule'
+                  bookings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScheduleBooking'
+              example:
+                ok: true
+                schedule:
+                  date: '2026-10-05'
+                  dayOfWeek: 1
+                  courts: []
+                  slots: []
+                bookings: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/closures:
+    get:
+      tags: [Admin–Jadwal]
+      summary: Daftar penutupan (per tanggal, atau mendatang bila tanpa param)
+      operationId: listClosures
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Bila diisi, filter tanggal tersebut; bila kosong, 100 penutupan mendatang
+      responses:
+        '200':
+          description: Daftar closure
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, closures]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  closures:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Closure'
+              example:
+                ok: true
+                closures: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    post:
+      tags: [Admin–Jadwal]
+      summary: Buat penutupan lapangan (F9)
+      operationId: createClosure
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [courtId, date]
+              properties:
+                courtId:
+                  type: integer
+                  example: 1
+                date:
+                  type: string
+                  format: date
+                  example: '2026-10-05'
+                startHour:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  maximum: 24
+                  example: 10
+                  description: Null = tutup seluruh hari (wajib null bersama endHour)
+                endHour:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  maximum: 24
+                  example: 12
+                reason:
+                  type: string
+                  example: Perbaikan net
+      responses:
+        '201':
+          description: Closure dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, closure]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  closure:
+                    $ref: '#/components/schemas/Closure'
+              example:
+                ok: true
+                closure:
+                  id: 1
+                  courtId: 1
+                  closureDate: '2026-10-05'
+                  startHour: 10
+                  endHour: 12
+                  reason: Perbaikan net
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/closures/{id}:
+    delete:
+      tags: [Admin–Jadwal]
+      summary: Hapus penutupan (booking lama tidak terpengaruh)
+      operationId: deleteClosure
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Closure dihapus
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, deleted]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  deleted:
+                    type: object
+                    required: [id]
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /admin/bookings:
+    get:
+      tags: [Admin–Monitoring]
+      summary: Daftar booking — filter status, cari, flag hampir-kedaluwarsa (F10)
+      operationId: listAdminBookings
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [semua, menunggu_pembayaran, terkonfirmasi, dibatalkan]
+            default: semua
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Cari nama/HP/kode/lapangan
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: expiring
+          in: query
+          schema:
+            type: string
+            enum: ['1']
+          description: "'1' = hanya menunggu yang kedaluwarsa ≤ 5 menit lagi"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Daftar + total
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, bookings, total, limit, offset]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  bookings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminBooking'
+                  total:
+                    type: integer
+                    example: 1
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+              example:
+                ok: true
+                bookings:
+                  - code: PD-9GAREK
+                    courtId: 1
+                    courtName: Lapangan 1
+                    date: '2026-10-07'
+                    status: menunggu_pembayaran
+                    source: walkin
+                    subtotal: 35000
+                    expiresAt: '2026-09-29T18:36:13.722Z'
+                    customerName: Uji Monitor
+                    customerPhone: '6281900011122'
+                    paymentStatus: pending
+                    hours: [10]
+                total: 1
+                limit: 50
+                offset: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Admin–Jadwal]
+      summary: Booking manual walk-in/telepon (F8)
+      operationId: createWalkinBooking
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [courtId, date, hours, name, phone]
+              properties:
+                courtId:
+                  type: integer
+                  example: 3
+                date:
+                  type: string
+                  format: date
+                  example: '2026-10-06'
+                hours:
+                  type: array
+                  items:
+                    type: integer
+                  example: [9, 10]
+                name:
+                  type: string
+                  example: Walkin Sari
+                phone:
+                  type: string
+                  example: '082100011122'
+                paid:
+                  type: boolean
+                  default: false
+                  description: true = tunai → langsung terkonfirmasi
+      responses:
+        '201':
+          description: Booking manual dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, booking, payment]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  booking:
+                    $ref: '#/components/schemas/BookingCreated'
+                  payment:
+                    $ref: '#/components/schemas/PaymentRef'
+              example:
+                ok: true
+                booking:
+                  code: PD-5E9A4T
+                  courtId: 3
+                  date: '2026-10-06'
+                  hours: [9, 10]
+                  status: terkonfirmasi
+                  subtotal: 80000
+                  expiresAt: null
+                payment:
+                  orderId: ORD-PD-5E9A4T
+                  amount: 80000
+                  status: paid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/bookings/{code}:
+    patch:
+      tags: [Admin–Monitoring]
+      summary: Konfirmasi / batalkan booking — remediasi (F10)
+      operationId: actOnBooking
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            example: PD-9GAREK
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [confirm, cancel]
+      responses:
+        '200':
+          description: Status diperbarui
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, booking]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  booking:
+                    type: object
+                    required: [code, status]
+                    properties:
+                      code:
+                        type: string
+                      status:
+                        type: string
+              example:
+                ok: true
+                booking:
+                  code: PD-9GAREK
+                  status: terkonfirmasi
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /admin/overview:
+    get:
+      tags: [Admin–Monitoring]
+      summary: Ringkasan harian — KPI omzet/okupansi/antrean (F7)
+      operationId: adminOverview
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Default hari ini
+      responses:
+        '200':
+          description: KPI + hampir-kedaluwarsa + closure hari itu
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, date, kpi, expiring, closures]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  date:
+                    type: string
+                    format: date
+                  kpi:
+                    $ref: '#/components/schemas/OverviewKpi'
+                  expiring:
+                    type: array
+                    items:
+                      type: object
+                  closures:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Closure'
+              example:
+                ok: true
+                date: '2026-10-08'
+                kpi:
+                  omzet: 0
+                  occupancy: 2
+                  totalSlots: 86
+                  occupiedSlots: 2
+                  freeSlots: 84
+                  totalBookings: 1
+                  confirmed: 0
+                  waiting: 1
+                  cancelled: 0
+                  expiringCount: 0
+                expiring: []
+                closures: []
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/courts:
+    post:
+      tags: [Admin–Lapangan]
+      summary: Tambah lapangan (jam default 08:00–22:00 × 7 hari)
+      operationId: createCourt
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: Lapangan 7
+                hourlyPrice:
+                  type: integer
+                  example: 35000
+                isIndoor:
+                  type: boolean
+                  example: true
+                description:
+                  type: string
+                  example: Lapangan baru
+      responses:
+        '201':
+          description: Lapangan dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, court]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  court:
+                    $ref: '#/components/schemas/CourtDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/courts/{id}:
+    patch:
+      tags: [Admin–Lapangan]
+      summary: Ubah harga/status/jam operasional lapangan
+      operationId: updateCourt
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                hourlyPrice:
+                  type: integer
+                  example: 32000
+                isActive:
+                  type: boolean
+                  example: true
+                openHour:
+                  type: integer
+                  minimum: 0
+                  maximum: 24
+                  example: 7
+                closeHour:
+                  type: integer
+                  minimum: 0
+                  maximum: 24
+                  example: 23
+                name:
+                  type: string
+                description:
+                  type: string
+                isIndoor:
+                  type: boolean
+      responses:
+        '200':
+          description: Lapangan diperbarui
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, court]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  court:
+                    $ref: '#/components/schemas/CourtDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /payments/{code}/charge:
+    post:
+      tags: [Pembayaran]
+      summary: Charge QRIS via PaymentDriver (F4, idempoten)
+      operationId: chargePayment
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+          example: PD-VKB6WV
+      responses:
+        '200':
+          description: Payload QR (mock) + expiry server
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, payment, booking]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  payment:
+                    type: object
+                    properties:
+                      orderId:
+                        type: string
+                        example: ORD-PD-VKB6WV
+                      amount:
+                        type: integer
+                        example: 70000
+                      status:
+                        type: string
+                        example: pending
+                      qrString:
+                        type: string
+                        example: MOCK-QRIS:ORD-PD-VKB6WV:70000
+                      expiresAt:
+                        type: string
+                        format: date-time
+                  booking:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                      status:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+              example:
+                ok: true
+                payment:
+                  orderId: ORD-PD-YTZE3G
+                  amount: 70000
+                  status: pending
+                  qrString: MOCK-QRIS:ORD-PD-YTZE3G:70000
+                  expiresAt: '2026-09-30T12:11:23.920Z'
+                booking:
+                  code: PD-YTZE3G
+                  status: menunggu_pembayaran
+                  expiresAt: '2026-09-30T12:11:23.920Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Sudah terbayar / dibatalkan / lewat 15 menit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                ok: false
+                message: Booking sudah terbayar
+        '429':
+          description: Rate limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /payments/{code}/status:
+    get:
+      tags: [Pembayaran]
+      summary: Polling status pembayaran + booking (F4, fallback webhook)
+      operationId: getPaymentStatus
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+          example: PD-VKB6WV
+      responses:
+        '200':
+          description: Status booking + payment
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, booking, payment]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  booking:
+                    type: object
+                  payment:
+                    type: object
+              example:
+                ok: true
+                booking:
+                  code: PD-YTZE3G
+                  status: terkonfirmasi
+                  expiresAt: null
+                payment:
+                  orderId: ORD-PD-YTZE3G
+                  amount: 70000
+                  status: paid
+                  qrString: MOCK-QRIS:ORD-PD-YTZE3G:70000
+                  expiresAt: '2026-09-30T12:11:23.920Z'
+                  paidAt: '2026-09-30T12:12:01.000Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /webhooks/payment:
+    post:
+      tags: [Pembayaran]
+      summary: Webhook gateway — PAID → terkonfirmasi (F4, idempoten)
+      operationId: paymentWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, status]
+              properties:
+                orderId:
+                  type: string
+                  example: ORD-PD-VKB6WV
+                status:
+                  type: string
+                  example: PAID
+                  description: PAID/settlement/capture = bayar; expire/cancel/deny = gagal
+                amount:
+                  type: integer
+                  example: 70000
+                signature:
+                  type: string
+                  description: Mock abaikan isi; Midtrans verifikasi SHA-512
+      responses:
+        '200':
+          description: Booking terkonfirmasi (atau already=true bila ganda)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, booking]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  booking:
+                    type: object
+                  already:
+                    type: boolean
+              example:
+                ok: true
+                booking:
+                  code: PD-YTZE3G
+                  status: terkonfirmasi
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Booking sudah tidak menunggu pembayaran
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /cron/expire:
+    get:
+      tags: [Cron]
+      summary: Kedaluwarsakan menunggu_pembayaran > 15 mnt (F4, ADR 0006)
+      operationId: expireBookings
+      parameters:
+        - name: secret
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Alternatif header x-cron-secret / Bearer (CRON_SECRET)
+      responses:
+        '200':
+          description: Jumlah booking yang dikedaluwarsakan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, expiredCount, codes]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  expiredCount:
+                    type: integer
+                    example: 1
+                  codes:
+                    type: array
+                    items:
+                      type: string
+              example:
+                ok: true
+                expiredCount: 1
+                codes:
+                  - PD-CS624E
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tickets/{kode}:
+    get:
+      tags: [Tiket]
+      summary: Tiket publik via kode — tanpa login (F5)
+      operationId: getTicket
+      parameters:
+        - name: kode
+          in: path
+          required: true
+          schema:
+            type: string
+          example: PD-YTZE3G
+      responses:
+        '200':
+          description: Detail tiket + status check-in + notice Batal/Tutup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, ticket]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  ticket:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                      courtId:
+                        type: integer
+                      courtName:
+                        type: string
+                        nullable: true
+                      date:
+                        type: string
+                        format: date
+                      hours:
+                        type: array
+                        items:
+                          type: integer
+                      status:
+                        type: string
+                        example: terkonfirmasi
+                      subtotal:
+                        type: integer
+                      customerName:
+                        type: string
+                        nullable: true
+                      customerPhone:
+                        type: string
+                        nullable: true
+                      paymentStatus:
+                        type: string
+                        nullable: true
+                      paidAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      checkedInAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      checkedInBy:
+                        type: string
+                        nullable: true
+                      closureNotice:
+                        type: string
+                        nullable: true
+              example:
+                ok: true
+                ticket:
+                  code: PD-YTZE3G
+                  courtId: 2
+                  courtName: Lapangan 2
+                  date: '2026-10-03'
+                  hours: [18, 19]
+                  status: terkonfirmasi
+                  subtotal: 70000
+                  customerName: Raka Uji2
+                  customerPhone: '6281234567891'
+                  paymentStatus: paid
+                  paidAt: '2026-09-30T12:12:01.000Z'
+                  checkedInAt: null
+                  checkedInBy: null
+                  closureNotice: null
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /admin/checkin:
+    post:
+      tags: [Tiket]
+      summary: Check-in booking oleh admin — idempoten (F5)
+      operationId: adminCheckin
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  example: PD-YTZE3G
+      responses:
+        '200':
+          description: Check-in tercatat (atau already=true bila ganda)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, ticket]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  ticket:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                      checkedInAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      checkedInBy:
+                        type: string
+                        nullable: true
+                  already:
+                    type: boolean
+              example:
+                ok: true
+                ticket:
+                  code: PD-YTZE3G
+                  checkedInAt: '2026-09-30T12:20:00.000Z'
+                  checkedInBy: admin
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Bukan booking terkonfirmasi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                ok: false
+                message: Hanya booking terkonfirmasi yang bisa check-in
+  /admin/notifications:
+    get:
+      tags: [Admin–Monitoring]
+      summary: Baca log notifikasi — audit tiket/pengingat/kedaluwarsa (F6)
+      operationId: listNotifications
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [tiket, pengingat_h1, pengingat_h2, sisa_pembayaran, kadaluarsa]
+        - name: channel
+          in: query
+          schema:
+            type: string
+            enum: [whatsapp, email]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [terkirim, gagal]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Daftar log + total
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, logs, total, limit, offset]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  logs:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+              example:
+                ok: true
+                logs:
+                  - id: 3
+                    bookingId: 7
+                    code: PD-YTZE3G
+                    channel: whatsapp
+                    type: pengingat_h2
+                    status: terkirim
+                    sentAt: '2026-09-30T12:30:00.000Z'
+                    error: null
+                total: 3
+                limit: 5
+                offset: 0
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /cron/reminders:
+    get:
+      tags: [Cron]
+      summary: Kirim pengingat H-1 & H-2jam — idempoten, retry 3x (F6)
+      operationId: sendReminders
+      parameters:
+        - name: secret
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Alternatif header x-cron-secret / Bearer (CRON_SECRET)
+      responses:
+        '200':
+          description: Hasil pengiriman batch ini
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, checked, skipped, sent, failed]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  checked:
+                    type: integer
+                  skipped:
+                    type: integer
+                  sent:
+                    type: array
+                    items:
+                      type: object
+                  failed:
+                    type: array
+                    items:
+                      type: object
+              example:
+                ok: true
+                checked: 3
+                skipped: 2
+                sent:
+                  - code: PD-YTZE3G
+                    type: pengingat_h2
+                    channel: whatsapp
+                failed: []
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/reports:
+    get:
+      tags: [Admin–Laporan]
+      summary: Rekap operasional JSON + ekspor CSV server-side (F11)
+      operationId: adminReports
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Default 29 hari lalu
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Default hari ini
+        - name: courtId
+          in: query
+          schema:
+            type: integer
+          description: Filter 1 lapangan
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+          description: csv = unduh file (Content-Disposition attachment)
+      responses:
+        '200':
+          description: Ringkasan + rekap per lapangan (atau file CSV)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, from, to, summary, courts]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  from:
+                    type: string
+                    format: date
+                  to:
+                    type: string
+                    format: date
+                  summary:
+                    type: object
+                    properties:
+                      omzet:
+                        type: integer
+                      totalBookings:
+                        type: integer
+                      cancelled:
+                        type: integer
+                      waiting:
+                        type: integer
+                      avgOccupancy:
+                        type: integer
+                  courts:
+                    type: array
+                    items:
+                      type: object
+              example:
+                ok: true
+                from: '2026-09-01'
+                to: '2026-09-30'
+                summary:
+                  omzet: 110000
+                  totalBookings: 2
+                  cancelled: 1
+                  waiting: 0
+                  avgOccupancy: 0
+                courts:
+                  - courtId: 2
+                    name: Lapangan 2
+                    isIndoor: false
+                    bookingCount: 1
+                    revenue: 70000
+                    occupiedSlots: 2
+                    totalSlots: 480
+                    occupancyPct: 0
+            text/csv:
+              schema:
+                type: string
+                example: '"Lapangan","Periode","Booking terkonfirmasi","Omzet","Okupansi","Mulai","Sampai"'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: padelclub_admin
+      description: Token sesi admin (HttpOnly). Diperoleh dari POST /admin/login.
+    customerCookie:
+      type: apiKey
+      in: cookie
+      name: padel_session
+      description: Sesi pelanggan HMAC (HttpOnly). Diperoleh dari POST /otp/verify.
+  responses:
+    BadRequest:
+      description: Validasi gagal
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            ok: false
+            message: Parameter date wajib format YYYY-MM-DD
+    Unauthorized:
+      description: Tanpa sesi / sesi kedaluwarsa
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            ok: false
+            message: Unauthorized
+    NotFound:
+      description: Data tidak ditemukan
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            ok: false
+            message: Closure tidak ditemukan
+    Conflict:
+      description: Slot bentrok / validasi konflik
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            ok: false
+            message: Slot sudah dipesan pihak lain. Pilih jam lain.
+    RateLimited:
+      description: Terlalu banyak percobaan
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            ok: false
+            message: Terlalu banyak percobaan, coba lagi sebentar
+  schemas:
+    Health:
+      type: object
+      required: [ok, db]
+      properties:
+        ok:
+          type: boolean
+        db:
+          type: string
+          enum: [connected, error]
+    Court:
+      type: object
+      required: [id, name, hourlyPrice, isActive, isIndoor, description, openHour, closeHour]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        hourlyPrice:
+          type: integer
+          description: Rupiah per jam
+        isActive:
+          type: boolean
+        isIndoor:
+          type: boolean
+        description:
+          type: string
+          nullable: true
+        openHour:
+          type: integer
+          description: Jam buka hari ini (0–24)
+        closeHour:
+          type: integer
+    CourtDetail:
+      type: object
+      description: Baris courts (tanpa jam operasional)
+      required: [id, name, hourlyPrice, isActive, isIndoor]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        hourlyPrice:
+          type: integer
+        isActive:
+          type: boolean
+        isIndoor:
+          type: boolean
+        description:
+          type: string
+          nullable: true
+    DaySchedule:
+      type: object
+      required: [date, dayOfWeek, courts, slots]
+      properties:
+        date:
+          type: string
+          format: date
+        dayOfWeek:
+          type: integer
+          minimum: 0
+          maximum: 6
+        courts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Court'
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/DaySlot'
+    DaySlot:
+      type: object
+      required: [courtId, hour, status]
+      properties:
+        courtId:
+          type: integer
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        status:
+          type: string
+          enum: [kosong, menunggu_pembayaran, terkonfirmasi, tutup]
+        code:
+          type: string
+          nullable: true
+          description: Kode booking penghuni slot (bila terisi)
+        reason:
+          type: string
+          nullable: true
+          description: Alasan penutupan (bila status tutup)
+    Closure:
+      type: object
+      required: [id, courtId, closureDate]
+      properties:
+        id:
+          type: integer
+        courtId:
+          type: integer
+        closureDate:
+          type: string
+          format: date
+        startHour:
+          type: integer
+          nullable: true
+          description: Null = seluruh hari
+        endHour:
+          type: integer
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+    Admin:
+      type: object
+      required: [id, username]
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+    ScheduleBooking:
+      type: object
+      description: Booking per tanggal (jam dikelompokkan) untuk modal admin
+      required: [id, code, courtId, status, source, subtotal, hours]
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        courtId:
+          type: integer
+        status:
+          type: string
+          enum: [menunggu_pembayaran, terkonfirmasi, dibatalkan]
+        source:
+          type: string
+          enum: [online, walkin]
+        subtotal:
+          type: integer
+        customerName:
+          type: string
+          nullable: true
+        customerPhone:
+          type: string
+          nullable: true
+        hours:
+          type: array
+          items:
+            type: integer
+    BookingCreated:
+      type: object
+      description: Booking yang baru ditahan/dibuat
+      required: [code, courtId, date, hours, status, subtotal]
+      properties:
+        code:
+          type: string
+        courtId:
+          type: integer
+        courtName:
+          type: string
+          nullable: true
+        date:
+          type: string
+          format: date
+        hours:
+          type: array
+          items:
+            type: integer
+        status:
+          type: string
+          enum: [menunggu_pembayaran, terkonfirmasi]
+        subtotal:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null bila langsung terkonfirmasi (walk-in tunai)
+    PaymentRef:
+      type: object
+      required: [orderId, amount, status]
+      properties:
+        orderId:
+          type: string
+        amount:
+          type: integer
+        status:
+          type: string
+          enum: [pending, paid, failed, expired]
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+    BookingDetail:
+      type: object
+      description: Detail booking via kode (publik)
+      required: [code, courtId, date, hours, status, source, subtotal]
+      properties:
+        code:
+          type: string
+        courtId:
+          type: integer
+        courtName:
+          type: string
+          nullable: true
+        hourlyPrice:
+          type: integer
+          nullable: true
+        date:
+          type: string
+          format: date
+        hours:
+          type: array
+          items:
+            type: integer
+        status:
+          type: string
+          enum: [menunggu_pembayaran, terkonfirmasi, dibatalkan]
+        source:
+          type: string
+          enum: [online, walkin]
+        subtotal:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        customerName:
+          type: string
+          nullable: true
+        customerPhone:
+          type: string
+          nullable: true
+        paymentStatus:
+          type: string
+          nullable: true
+          enum: [pending, paid, failed, expired]
+    MyBooking:
+      type: object
+      description: Riwayat milik sesi pelanggan
+      required: [code, courtId, courtName, date, status, source, subtotal, hours]
+      properties:
+        code:
+          type: string
+        courtId:
+          type: integer
+        courtName:
+          type: string
+        date:
+          type: string
+          format: date
+        status:
+          type: string
+        source:
+          type: string
+        subtotal:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        hours:
+          type: array
+          items:
+            type: integer
+    AdminBooking:
+      type: object
+      description: Baris booking untuk tabel admin (jam dikelompokkan)
+      required: [code, courtId, courtName, date, status, source, subtotal, hours]
+      properties:
+        code:
+          type: string
+        courtId:
+          type: integer
+        courtName:
+          type: string
+        date:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [menunggu_pembayaran, terkonfirmasi, dibatalkan]
+        source:
+          type: string
+          enum: [online, walkin]
+        subtotal:
+          type: integer
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        customerName:
+          type: string
+          nullable: true
+        customerPhone:
+          type: string
+          nullable: true
+        paymentStatus:
+          type: string
+          nullable: true
+        hours:
+          type: array
+          items:
+            type: integer
+    OverviewKpi:
+      type: object
+      required: [omzet, occupancy, totalSlots, occupiedSlots, freeSlots, totalBookings, confirmed, waiting, cancelled, expiringCount]
+      properties:
+        omzet:
+          type: integer
+          description: Sum subtotal terkonfirmasi tanggal tersebut (Rp)
+        occupancy:
+          type: integer
+          description: Persen slot terisi
+        totalSlots:
+          type: integer
+        occupiedSlots:
+          type: integer
+        freeSlots:
+          type: integer
+        totalBookings:
+          type: integer
+        confirmed:
+          type: integer
+        waiting:
+          type: integer
+        cancelled:
+          type: integer
+        expiringCount:
+          type: integer
+    Error:
+      type: object
+      required: [ok, message]
+      properties:
+        ok:
+          type: boolean
+          example: false
+        message:
+          type: string
