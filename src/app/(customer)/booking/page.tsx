@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Stepper } from "@/components/ui/Stepper";
@@ -30,6 +31,13 @@ import {
   todayString,
 } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { isValidPhone } from "@/lib/phone";
+import {
+  findSnapScript,
+  notifySnapReady,
+  SNAP_SCRIPT_ATTR,
+  useSnapReady,
+} from "@/lib/use-snap";
 
 type SelectedSlot = { courtId: number; hour: number };
 
@@ -62,12 +70,26 @@ export default function BookingPage() {
   const [devCode, setDevCode] = useState<string | undefined>();
   const [holdExpiry, setHoldExpiry] = useState<string | undefined>();
   const [holdSeconds, setHoldSeconds] = useState(15 * 60);
-  // State pembayaran QRIS real (Batch 4, driver mock).
+  // State pembayaran (Batch 4 mock → P1 Midtrans sandbox → ADR 0008 Snap popup).
   const [qrString, setQrString] = useState<string | undefined>();
+  const [qrImageUrl, setQrImageUrl] = useState<string | undefined>();
+  const [snapToken, setSnapToken] = useState<string | undefined>();
+  const [snapRedirectUrl, setSnapRedirectUrl] = useState<string | undefined>();
+  const [payGateway, setPayGateway] = useState<string | undefined>();
   const [payOrderId, setPayOrderId] = useState<string | undefined>();
   const [payError, setPayError] = useState<string | undefined>();
+  const [payInfo, setPayInfo] = useState<string | undefined>();
+  const [payFailed, setPayFailed] = useState<string | undefined>();
+  const snapReady = useSnapReady();
   const [payLoading, setPayLoading] = useState(false);
   const [isExpired, setIsExpired] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  const router = useRouter();
+  // Guard anti-redirect ganda (polling 5 dtk bisa deteksi sukses berulang).
+  const hasRedirected = useRef(false);
+  const redirectTimer = useRef<number | undefined>(undefined);
+  // Guard auto-buka popup Snap sekali per token (tidak dibuka ulang saat re-render).
+  const autoOpenedFor = useRef<string | null>(null);
 
   // Slot real-time dari API (DB). Auto-refresh tiap 10 detik di dalam hook.
   const {
@@ -139,8 +161,8 @@ export default function BookingPage() {
   }
 
   async function sendOtp() {
-    if (!name.trim() || phone.replace(/\D/g, "").length < 9) {
-      setAuthError("Isi nama dan nomor HP yang valid.");
+    if (!name.trim() || !isValidPhone(phone)) {
+      setAuthError("Isi nama dan nomor HP yang valid (contoh: 0812…).");
       return;
     }
     setAuthError(undefined);
@@ -222,6 +244,9 @@ export default function BookingPage() {
       setQrString(undefined);
       setPayOrderId(undefined);
       setPayError(undefined);
+      setPayInfo(undefined);
+      setPayFailed(undefined);
+      autoOpenedFor.current = null;
       setStep("pembayaran");
       void loadCharge(bjson.booking.code);
     } catch {
@@ -234,19 +259,32 @@ export default function BookingPage() {
   async function loadCharge(code: string) {
     setPayLoading(true);
     setPayError(undefined);
+    setPayInfo(undefined);
+    setPayFailed(undefined);
     try {
       const res = await fetch(`/api/payments/${code}/charge`, { method: "POST" });
       const json = (await res.json()) as {
         ok: boolean;
         message?: string;
-        payment?: { orderId: string; qrString: string | null };
+        payment?: {
+          orderId: string;
+          qrString: string | null;
+          qrImageUrl?: string | null;
+          snapToken?: string | null;
+          redirectUrl?: string | null;
+          gateway?: string;
+        };
       };
       if (!json.ok || !json.payment) {
-        setPayError(json.message ?? "Gagal membuat QR pembayaran.");
+        setPayError(json.message ?? "Gagal membuat pembayaran.");
         if (!res.ok && res.status === 409) setIsExpired(true);
         return;
       }
       setQrString(json.payment.qrString ?? undefined);
+      setQrImageUrl(json.payment.qrImageUrl ?? undefined);
+      setSnapToken(json.payment.snapToken ?? undefined);
+      setSnapRedirectUrl(json.payment.redirectUrl ?? undefined);
+      setPayGateway(json.payment.gateway);
       setPayOrderId(json.payment.orderId);
     } catch {
       setPayError("Tidak dapat terhubung ke server.");
@@ -255,21 +293,46 @@ export default function BookingPage() {
     }
   }
 
-  async function refreshPayStatus(code: string): Promise<string | undefined> {
+  const refreshPayStatus = useCallback(async (code: string): Promise<string | undefined> => {
     try {
       const res = await fetch(`/api/payments/${code}/status`);
       const json = (await res.json()) as {
         ok: boolean;
         booking?: { status: string };
-        payment?: { qrString: string | null; orderId: string };
+        payment?: {
+          qrString: string | null;
+          qrImageUrl?: string | null;
+          snapToken?: string | null;
+          redirectUrl?: string | null;
+          orderId: string;
+          gateway?: string;
+        };
       };
       if (!json.ok || !json.booking) return undefined;
       if (json.payment?.qrString) {
         setQrString(json.payment.qrString);
         setPayOrderId(json.payment.orderId);
       }
+      if (json.payment?.qrImageUrl) setQrImageUrl(json.payment.qrImageUrl);
+      if (json.payment?.snapToken) {
+        setSnapToken(json.payment.snapToken);
+        setPayOrderId(json.payment.orderId);
+      }
+      if (json.payment?.redirectUrl) setSnapRedirectUrl(json.payment.redirectUrl);
+      if (json.payment?.gateway) setPayGateway(json.payment.gateway);
       if (json.booking.status === "terkonfirmasi") {
+        setPayFailed(undefined);
+        setPayError(undefined);
         setStep("selesai");
+        // Auto-redirect ke tiket setelah pembayaran berhasil (sekali saja).
+        if (!hasRedirected.current) {
+          hasRedirected.current = true;
+          setRedirecting(true);
+          window.clearTimeout(redirectTimer.current);
+          redirectTimer.current = window.setTimeout(() => {
+            router.replace(`/tiket/${code}`);
+          }, 1800);
+        }
       } else if (json.booking.status === "dibatalkan") {
         setIsExpired(true);
       }
@@ -277,6 +340,90 @@ export default function BookingPage() {
     } catch {
       return undefined;
     }
+  }, [router]);
+
+  // Bersihkan timer redirect saat halaman dilepas.
+  useEffect(() => {
+    return () => window.clearTimeout(redirectTimer.current);
+  }, []);
+
+  // Muat snap.js Midtrans saat pembayaran Snap aktif (ADR 0008).
+  // Ketersediaan client key dihitung saat render (bukan setState di effect).
+  const snapConfigured = (process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ?? "").length > 0;
+  const snapLoading = payGateway === "midtrans" && snapConfigured && !snapReady;
+  useEffect(() => {
+    if (payGateway !== "midtrans" || !snapConfigured || snapReady) return;
+    // Skrip sudah ada di DOM (dimuat komponen lain / percobaan sebelumnya):
+    // jangan buat ulang — cukup tunggu event load lalu beri tahu React.
+    const existing = findSnapScript();
+    if (existing) {
+      const notify = () => notifySnapReady();
+      existing.addEventListener("load", notify, { once: true });
+      return () => existing.removeEventListener("load", notify);
+    }
+    const clientKey = process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY ?? "";
+    const snapSrc =
+      process.env.NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION === "true"
+        ? "https://app.midtrans.com/snap/snap.js"
+        : "https://app.sandbox.midtrans.com/snap/snap.js";
+    const script = document.createElement("script");
+    script.src = snapSrc;
+    script.async = true;
+    script.setAttribute("data-client-key", clientKey);
+    script.setAttribute(SNAP_SCRIPT_ATTR, "1");
+    script.onload = () => notifySnapReady();
+    script.onerror = () => {
+      setPayError("Gagal memuat jendela pembayaran Midtrans. Periksa koneksi lalu muat ulang.");
+    };
+    document.body.appendChild(script);
+  }, [payGateway, snapConfigured, snapReady]);
+
+  /** Buka popup Snap; sukses/pending dicek ulang via status server. */
+  const payWithSnap = useCallback(() => {
+    if (!snapToken || !ticketCode) return;
+    if (!window.snap) {
+      setPayError("Jendela pembayaran belum siap. Tunggu sebentar lalu coba lagi.");
+      return;
+    }
+    setPayError(undefined);
+    setPayInfo(undefined);
+    setPayFailed(undefined);
+    window.snap.pay(snapToken, {
+      onSuccess: () => {
+        void refreshPayStatus(ticketCode);
+      },
+      onPending: () => {
+        setPayInfo("Pembayaran diterima Midtrans dan sedang diproses — halaman ini otomatis lanjut begitu lunas.");
+        void refreshPayStatus(ticketCode);
+      },
+      onError: () => {
+        setPayFailed("Pembayaran gagal diproses oleh Midtrans. Coba lagi atau pilih metode lain.");
+      },
+      onClose: () => {
+        setPayInfo("Jendela pembayaran ditutup — pembayaranmu belum selesai. Klik tombol bayar untuk lanjut.");
+      },
+    });
+  }, [snapToken, ticketCode, refreshPayStatus]);
+
+  // Buka popup Snap otomatis sekali setelah token + snap.js siap.
+  // Bila browser memblokir popup, tombol bayar + link tab baru tetap tersedia.
+  useEffect(() => {
+    if (step !== "pembayaran" || isExpired || payFailed) return;
+    if (payGateway !== "midtrans" || !snapToken || !snapReady) return;
+    if (typeof window === "undefined" || !window.snap) return;
+    if (autoOpenedFor.current === snapToken) return;
+    autoOpenedFor.current = snapToken;
+    payWithSnap();
+  }, [step, isExpired, payFailed, payGateway, snapToken, snapReady, payWithSnap]);
+
+  /** Ulangi pembayaran setelah gagal — ambil token baru lalu buka popup lagi. */
+  function retryPay() {
+    if (!ticketCode) return;
+    setPayFailed(undefined);
+    setPayError(undefined);
+    setPayInfo(undefined);
+    autoOpenedFor.current = null;
+    void loadCharge(ticketCode);
   }
 
   // Polling fallback tiap 5 detik selama menunggu pembayaran (webhook-first).
@@ -286,9 +433,9 @@ export default function BookingPage() {
       void refreshPayStatus(ticketCode);
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [step, ticketCode, isExpired]);
+  }, [step, ticketCode, isExpired, refreshPayStatus]);
 
-  /** Simulasi bayar khusus driver mock (hilang saat Midtrans sandbox tiba). */
+  /** Simulasi bayar — tombolnya hanya tampil saat driver mock. */
   async function simulatePay() {
     if (!ticketCode || !payOrderId) return;
     setSimulating(true);
@@ -313,10 +460,20 @@ export default function BookingPage() {
   }
 
   function backToSlots() {
+    window.clearTimeout(redirectTimer.current);
+    hasRedirected.current = false;
+    setRedirecting(false);
     setIsExpired(false);
     setTicketCode(undefined);
     setQrString(undefined);
+    setQrImageUrl(undefined);
+    setSnapToken(undefined);
+    setSnapRedirectUrl(undefined);
+    setPayGateway(undefined);
     setPayOrderId(undefined);
+    setPayInfo(undefined);
+    setPayFailed(undefined);
+    autoOpenedFor.current = null;
     setSelected([]);
     refreshSlots();
     setStep("slot");
@@ -616,10 +773,10 @@ export default function BookingPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/80 px-5 py-4 sm:px-6">
                   <div>
                     <p className="text-headline-sm text-on-surface">
-                      {step === "identitas" ? "Checkout cepat" : "Pembayaran QRIS"}
+                      {step === "identitas" ? "Checkout cepat" : "Pembayaran"}
                     </p>
                     <p className="mt-0.5 text-body-sm text-slate-whisper">
-                      {court?.name} · {dateLabel(date)} · {sortedSelected.length} jam
+                      {court?.name} · {dateLabel(date)} · {timeRange} · {sortedSelected.length} jam
                     </p>
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => setStep("review")}>
@@ -656,6 +813,9 @@ export default function BookingPage() {
                           onChange={(event) => setPhone(event.target.value)}
                           placeholder="812 3456 7890"
                         />
+                        <p className="mt-1.5 text-body-sm text-slate-whisper">
+                          Awalan +62 sudah terisi — cukup tulis 08… atau 812….
+                        </p>
                       </div>
                       {otpSent ? (
                         <div className="space-y-3 rounded-xl bg-mist-shadow p-4">
@@ -715,56 +875,26 @@ export default function BookingPage() {
                         Pilih slot lagi
                       </Button>
                     </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-4 pt-2">
-                      <div className="flex items-center gap-2 text-label-md text-on-surface">
-                        <IconClock size={16} /> Selesaikan pembayaran dalam{" "}
-                        <Countdown
-                          key={holdExpiry ?? "default"}
-                          seconds={holdSeconds}
-                        />
-                      </div>
-                      <p className="text-body-sm tabular-nums text-slate-whisper">
-                        Kode booking: {ticketCode ?? "—"}
-                        {payOrderId ? ` · Order: ${payOrderId}` : ""}
-                      </p>
-                      {payLoading && !qrString ? (
-                        <p className="text-body-md text-slate-whisper">
-                          Menyiapkan QR pembayaran…
+                  ) : payFailed ? (
+                    <div className="flex flex-col items-center gap-4 pt-2 text-center">
+                      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-danger-light text-danger">
+                        <IconAlert size={26} />
+                      </span>
+                      <div>
+                        <p className="text-headline-sm text-on-surface">
+                          Pembayaran gagal
                         </p>
-                      ) : qrString ? (
-                        <>
-                          <QRBox text={qrString} size={168} />
-                          <p className="max-w-full break-all rounded-lg bg-mist-shadow px-3 py-2 font-mono text-body-sm tabular-nums text-slate-whisper">
-                            {qrString}
-                          </p>
-                        </>
-                      ) : null}
-                      {payError && (
-                        <p
-                          className="flex items-center gap-2 text-body-md font-semibold text-danger"
-                          role="alert"
-                        >
-                          <IconAlert size={16} /> {payError}
+                        <p className="mt-1 max-w-sm text-body-md text-slate-whisper">
+                          {payFailed}
                         </p>
-                      )}
-                      <div className="text-center">
-                        <p className="text-headline-md tabular-nums text-on-surface">
-                          {formatRupiah(subtotal)}
-                        </p>
-                        <p className="mt-1 text-body-md text-slate-whisper">
-                          Scan dengan aplikasi e-wallet atau m-banking.
+                        <p className="mt-2 text-body-sm tabular-nums text-slate-whisper">
+                          Kode booking: <span className="font-semibold text-on-surface">{ticketCode ?? "—"}</span>
+                          {payOrderId ? ` · Order: ${payOrderId}` : ""}
                         </p>
                       </div>
                       <div className="w-full space-y-2">
-                        <Button
-                          onClick={() => void simulatePay()}
-                          fullWidth
-                          size="lg"
-                          loading={simulating}
-                          disabled={!payOrderId}
-                        >
-                          {simulating ? "Memverifikasi pembayaran…" : "Saya sudah bayar"}
+                        <Button onClick={retryPay} fullWidth size="lg" loading={payLoading}>
+                          Coba lagi
                         </Button>
                         <Button
                           variant="secondary"
@@ -775,8 +905,177 @@ export default function BookingPage() {
                         >
                           Cek status pembayaran
                         </Button>
+                        <Button
+                          variant="secondary"
+                          fullWidth
+                          onClick={() => {
+                            setPayFailed(undefined);
+                            setStep("identitas");
+                          }}
+                        >
+                          Kembali
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-4 pt-2">
+                      <div className="flex w-full flex-wrap items-center justify-center gap-2 rounded-xl bg-pending-light/60 px-4 py-2.5 text-label-md text-on-surface">
+                        <IconClock size={16} /> Selesaikan pembayaran dalam{" "}
+                        <Countdown
+                          key={holdExpiry ?? "default"}
+                          seconds={holdSeconds}
+                        />
+                      </div>
+                      <p className="text-body-sm tabular-nums text-slate-whisper">
+                        Kode booking: <span className="font-semibold text-on-surface">{ticketCode ?? "—"}</span>
+                        {payOrderId ? ` · Order: ${payOrderId}` : ""}
+                      </p>
+                      {payLoading && !qrString && !qrImageUrl && !snapToken ? (
+                        <p className="text-body-md text-slate-whisper">
+                          Menyiapkan pembayaran…
+                        </p>
+                      ) : snapToken ? (
+                        <div className="w-full rounded-xl border border-line bg-field-white px-4 py-5 text-center shadow-sm">
+                          <p className="text-label-sm uppercase tracking-wider text-slate-whisper">
+                            Total pembayaran
+                          </p>
+                          <p className="mt-1 text-headline-lg tabular-nums text-on-surface">
+                            {formatRupiah(subtotal)}
+                          </p>
+                          <p className="mt-1 text-body-sm text-slate-whisper">
+                            {court?.name} · {dateLabel(date)} · {timeRange}
+                          </p>
+                          <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
+                            {["QRIS", "VA Bank", "E-Wallet", "Kartu", "Gerai Retail"].map((method) => (
+                              <span
+                                key={method}
+                                className="rounded-md bg-mist-shadow px-2 py-1 text-label-sm font-medium text-on-surface"
+                              >
+                                {method}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="mt-3 flex items-center justify-center gap-1.5 text-body-sm text-slate-whisper">
+                            <MIcon name="shield" className="text-[16px] text-court-green-deep" />
+                            Pembayaran aman via Midtrans — pilih metodemu di langkah berikut.
+                          </p>
+                        </div>
+                      ) : qrImageUrl ? (
+                        <>
+                          {/* QR asli Midtrans — bisa dipindai e-wallet/m-banking. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={qrImageUrl}
+                            alt="Kode QRIS pembayaran"
+                            width={200}
+                            height={200}
+                            className="rounded-lg border border-line bg-white p-2"
+                          />
+                          <p className="max-w-full break-all rounded-lg bg-mist-shadow px-3 py-2 font-mono text-body-sm tabular-nums text-slate-whisper">
+                            {qrString}
+                          </p>
+                          <p className="text-headline-md tabular-nums text-on-surface">
+                            {formatRupiah(subtotal)}
+                          </p>
+                        </>
+                      ) : qrString ? (
+                        <>
+                          <QRBox text={qrString} size={168} />
+                          <p className="max-w-full break-all rounded-lg bg-mist-shadow px-3 py-2 font-mono text-body-sm tabular-nums text-slate-whisper">
+                            {qrString}
+                          </p>
+                          <p className="text-headline-md tabular-nums text-on-surface">
+                            {formatRupiah(subtotal)}
+                          </p>
+                          <p className="text-body-md text-slate-whisper">
+                            Scan dengan aplikasi e-wallet atau m-banking.
+                          </p>
+                        </>
+                      ) : null}
+                      {payError && (
+                        <p
+                          className="flex w-full items-center gap-2 rounded-xl bg-danger-light px-4 py-3 text-body-md font-semibold text-danger"
+                          role="alert"
+                        >
+                          <IconAlert size={16} /> {payError}
+                        </p>
+                      )}
+                      {payInfo && !payError && (
+                        <p className="flex w-full items-start gap-2 rounded-xl bg-mist-shadow px-4 py-3 text-body-md text-on-surface">
+                          <IconInfo size={16} className="mt-0.5 shrink-0" /> {payInfo}
+                        </p>
+                      )}
+                      <div className="w-full space-y-2">
+                        {payGateway === "midtrans" ? (
+                          <>
+                            {!snapConfigured && (
+                              <p
+                                className="flex items-start gap-2 rounded-xl bg-pending-light/70 px-4 py-3 text-body-md font-semibold text-pending-ink"
+                                role="alert"
+                              >
+                                <IconAlert size={16} className="mt-0.5 shrink-0" /> Pembayaran
+                                belum bisa dibuka otomatis — client key Midtrans belum diisi
+                                di .env (tambah NEXT_PUBLIC_MIDTRANS_CLIENT_KEY lalu
+                                restart dev server). Sementara itu pakai tautan tab baru di
+                                bawah.
+                              </p>
+                            )}
+                            {snapLoading && (
+                              <p className="text-center text-body-sm text-slate-whisper">
+                                Membuka jendela pembayaran Midtrans…
+                              </p>
+                            )}
+                            <Button
+                              onClick={payWithSnap}
+                              fullWidth
+                              size="lg"
+                              loading={payLoading}
+                              disabled={!snapToken || !snapConfigured || snapLoading}
+                            >
+                              Bayar {formatRupiah(subtotal)} Sekarang
+                            </Button>
+                            {snapRedirectUrl ? (
+                              <p className="rounded-xl bg-mist-shadow px-3 py-2.5 text-center text-body-sm text-slate-whisper">
+                                Jendela tidak terbuka atau popup terblokir?{" "}
+                                <a
+                                  href={snapRedirectUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-semibold text-primary-container underline"
+                                >
+                                  buka halaman bayar Midtrans di tab baru
+                                </a>
+                                {" "}— bayar di sana, halaman ini otomatis lanjut ke tiket.
+                              </p>
+                            ) : null}
+                            <p className="flex items-start gap-2 rounded-xl bg-mist-shadow px-3 py-2.5 text-body-sm text-slate-whisper">
+                              <IconInfo size={14} className="mt-0.5 shrink-0" /> Setelah
+                              membayar, halaman otomatis pindah ke tiket begitu pembayaran
+                              terkonfirmasi.
+                            </p>
+                          </>
+                        ) : (
+                          <Button
+                            onClick={() => void simulatePay()}
+                            fullWidth
+                            size="lg"
+                            loading={simulating}
+                            disabled={!payOrderId}
+                          >
+                            {simulating ? "Memverifikasi pembayaran…" : "Saya sudah bayar"}
+                          </Button>
+                        )}
+                        <Button
+                          variant="secondary"
+                          fullWidth
+                          onClick={() =>
+                            ticketCode ? void refreshPayStatus(ticketCode) : undefined
+                          }
+                        >
+                          Cek status pembayaran
+                        </Button>
                         <Button variant="secondary" fullWidth onClick={() => setStep("identitas")}>
-                          Batal pembayaran
+                          Kembali
                         </Button>
                       </div>
                       <p className="flex items-start gap-2 rounded-xl bg-mist-shadow px-3 py-2.5 text-body-sm text-slate-whisper">
@@ -885,10 +1184,21 @@ export default function BookingPage() {
                   )}
                   {step === "identitas" && otpSent && (
                     <Button fullWidth size="lg" onClick={verifyOtp}>
-                      Verifikasi &amp; bayar QRIS
+                      Verifikasi &amp; lanjut bayar
                     </Button>
                   )}
-                  {step === "pembayaran" && !isExpired && (
+                  {step === "pembayaran" && !isExpired && payGateway === "midtrans" && (
+                    <Button
+                      fullWidth
+                      size="lg"
+                      loading={payLoading}
+                      disabled={!snapToken || !snapConfigured || snapLoading}
+                      onClick={payWithSnap}
+                    >
+                      Bayar {formatRupiah(subtotal)} Sekarang
+                    </Button>
+                  )}
+                  {step === "pembayaran" && !isExpired && payGateway !== "midtrans" && (
                     <Button
                       fullWidth
                       size="lg"
@@ -948,7 +1258,7 @@ export default function BookingPage() {
               }
               icon={<IconArrowRight size={18} />}
             >
-              {step === "slot" ? "Lanjut" : step === "review" ? "Checkout" : "Bayar QRIS"}
+              {step === "slot" ? "Lanjut" : step === "review" ? "Checkout" : "Bayar"}
             </Button>
           </div>
         </div>
@@ -962,14 +1272,33 @@ export default function BookingPage() {
                 <IconCheckCircle size={32} />
               </span>
               <div>
-                <h2 className="text-headline-md text-on-surface">Booking terkonfirmasi!</h2>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-court-grass-light px-3 py-1 text-label-sm font-bold uppercase tracking-wider text-court-green-deep">
+                  Lunas
+                </span>
+                <h2 className="mt-2 text-headline-md text-on-surface">Pembayaran berhasil!</h2>
                 <p className="mt-1 text-body-md text-slate-whisper">
-                  Pembayaran berhasil. Kode booking Anda:
+                  Slot kamu terkunci. Kode booking:
                 </p>
                 <p className="mt-2 font-mono text-headline-lg tracking-wider text-court-green-deep">
                   {ticketCode}
                 </p>
               </div>
+              <dl className="w-full space-y-2 rounded-xl bg-mist-shadow p-4 text-left text-body-md">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-whisper">Lapangan</dt>
+                  <dd className="text-right font-medium text-on-surface">{court?.name ?? "—"}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-slate-whisper">Jadwal</dt>
+                  <dd className="text-right tabular-nums text-on-surface">{shortDateLabel(date)} · {timeRange}</dd>
+                </div>
+                <div className="flex justify-between gap-3 border-t border-line pt-2">
+                  <dt className="text-slate-whisper">Total dibayar</dt>
+                  <dd className="text-right font-bold tabular-nums text-court-green-deep">
+                    {formatRupiah(subtotal)}
+                  </dd>
+                </div>
+              </dl>
               <div className="flex w-full flex-col gap-2">
                 <ButtonLink href={`/tiket/${ticketCode}`} fullWidth size="lg">
                   Lihat tiket
@@ -979,7 +1308,11 @@ export default function BookingPage() {
                 </ButtonLink>
               </div>
               <p className="flex items-center gap-1.5 text-body-sm text-slate-whisper">
-                <IconChevronLeft size={14} /> Tiket juga dikirim via WhatsApp &amp; email.
+                {redirecting ? (
+                  <>Mengalihkan ke tiket…</>
+                ) : (
+                  <><IconChevronLeft size={14} /> Tiket juga dikirim via WhatsApp &amp; email.</>
+                )}
               </p>
             </CardBody>
           </Card>

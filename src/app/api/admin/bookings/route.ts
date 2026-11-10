@@ -160,7 +160,7 @@ export async function POST(request: Request) {
     return jsonError('Format date wajib YYYY-MM-DD', 400);
   }
   if (!body.phone || !isValidPhone(body.phone)) {
-    return jsonError('Nomor HP tidak valid (gunakan format 08…)', 400);
+    return jsonError('Nomor HP tidak valid (contoh: 0812…)', 400);
   }
   const phone = normalizePhone(body.phone);
   const paid = body.paid === true;

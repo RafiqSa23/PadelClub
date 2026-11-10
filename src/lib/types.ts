@@ -27,6 +27,8 @@ export interface Slot {
   status: SlotStatus;
   code?: string;
   reason?: string;
+  /** Batas bayar slot `menunggu_pembayaran` — klien membukanya sendiri saat lewat. */
+  expiresAt?: string;
 }
 
 export interface Booking {

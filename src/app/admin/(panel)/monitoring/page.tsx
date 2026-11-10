@@ -7,7 +7,8 @@ import { MIcon } from "@/components/ui/MIcon";
 import { Toast } from "@/components/ui/Toast";
 import { Brand } from "@/components/layout/Brand";
 import { cn } from "@/lib/cn";
-import { BOOKINGS, COURTS, businessHours, generateDaySlots } from "@/lib/mock";
+import { BOOKINGS, COURTS } from "@/lib/mock-data";
+import { businessHours, generateDaySlots } from "@/lib/mock-logic";
 import { formatRupiah, todayString } from "@/lib/format";
 
 type Theme = "green" | "amber" | "blue";

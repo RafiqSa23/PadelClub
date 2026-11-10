@@ -1,6 +1,5 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { bookingSlots, bookings, closures, courtHours, courts } from '@/db/schema';
 
 export type DaySlotStatus =
   | 'kosong'
@@ -14,6 +13,11 @@ export interface DaySlot {
   status: DaySlotStatus;
   code?: string | null;
   reason?: string | null;
+  /**
+   * Batas bayar untuk slot `menunggu_pembayaran`. Dikirim ke klien supaya
+   * kartu kuning bisa berubah hijau tepat saat kedaluwarsa tanpa menunggu poll.
+   */
+  expiresAt?: string | null;
 }
 
 export interface DaySchedule {
@@ -32,6 +36,11 @@ export interface DaySchedule {
   slots: DaySlot[];
 }
 
+export interface DaySummary {
+  date: string;
+  freeCount: number;
+}
+
 export function isValidDateString(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const d = new Date(`${value}T00:00:00`);
@@ -42,6 +51,100 @@ export function dayOfWeekOf(dateStr: string): number {
   return new Date(`${dateStr}T00:00:00`).getDay();
 }
 
+/** Jam operasional cadangan bila `court_hours` tidak punya baris untuk hari itu. */
+const FALLBACK_OPEN = 7;
+const FALLBACK_CLOSE = 23;
+
+interface CourtRow {
+  id: number;
+  name: string;
+  hourlyPrice: number;
+  isActive: boolean;
+  isIndoor: boolean;
+  description: string | null;
+}
+
+interface HourRow {
+  courtId: number;
+  openTime: string;
+  closeTime: string;
+}
+
+interface BookingRow {
+  courtId: number;
+  hour: number;
+  status: string;
+  code: string | null;
+  expiresAt: string | null;
+}
+
+interface ClosureRow {
+  courtId: number;
+  startHour: number | null;
+  endHour: number | null;
+  reason: string | null;
+}
+
+/**
+ * Semua bahan jadwal 1 hari dalam SATU roundtrip (4 CTE + json_agg).
+ * Sebelumnya 4 query paralel — dengan pool `max: 5`, satu request menghabiskan
+ * 4 koneksi sekaligus sehingga beberapa pengunjung bersamaan saling mengantre.
+ */
+async function fetchDayInputs(
+  dateStr: string,
+  dow: number,
+): Promise<{
+  courts: CourtRow[];
+  hours: HourRow[];
+  bookings: BookingRow[];
+  closures: ClosureRow[];
+}> {
+  const rows = (await db.execute(sql`
+    WITH day_courts AS (
+      SELECT id, name, "hourlyPrice", "isActive", "isIndoor", description
+      FROM courts
+      ORDER BY id
+    ), day_hours AS (
+      SELECT "courtId", "openTime", "closeTime"
+      FROM court_hours
+      WHERE "dayOfWeek" = ${dow}
+    ), day_bookings AS (
+      SELECT bs."courtId", bs.hour, bk.status, bk.code, bk."expiresAt"
+      FROM booking_slots bs
+      JOIN bookings bk ON bk.id = bs."bookingId"
+      WHERE bs."slotDate" = ${dateStr}::date
+        AND bk.status <> 'dibatalkan'
+    ), day_closures AS (
+      SELECT "courtId", "startHour", "endHour", reason
+      FROM closures
+      WHERE "closureDate" = ${dateStr}::date
+    )
+    SELECT
+      (SELECT COALESCE(json_agg(dc), '[]'::json) FROM day_courts dc) AS courts,
+      (SELECT COALESCE(json_agg(dh), '[]'::json) FROM day_hours dh) AS hours,
+      (SELECT COALESCE(json_agg(dbk), '[]'::json) FROM day_bookings dbk) AS bookings,
+      (SELECT COALESCE(json_agg(dcl), '[]'::json) FROM day_closures dcl) AS closures
+  `)) as unknown as Array<{
+    courts: CourtRow[];
+    hours: HourRow[];
+    bookings: BookingRow[];
+    closures: ClosureRow[];
+  }>;
+
+  const row = rows[0];
+  return {
+    courts: row?.courts ?? [],
+    hours: row?.hours ?? [],
+    bookings: row?.bookings ?? [],
+    closures: row?.closures ?? [],
+  };
+}
+
+function hourOf(value: string): number | null {
+  const hour = Number(String(value).slice(0, 2));
+  return Number.isFinite(hour) ? hour : null;
+}
+
 /**
  * Bangun jadwal 1 hari dari 4 sumber:
  * court_hours (jam operasional) + booking_slots⨝bookings (non-batal,
@@ -50,59 +153,29 @@ export function dayOfWeekOf(dateStr: string): number {
  */
 export async function getDaySchedule(dateStr: string): Promise<DaySchedule> {
   const dow = dayOfWeekOf(dateStr);
-  const now = new Date();
-
-  const [courtRows, hoursRows, bookingRows, closureRows] = await Promise.all([
-    db
-      .select({
-        id: courts.id,
-        name: courts.name,
-        hourlyPrice: courts.hourlyPrice,
-        isActive: courts.isActive,
-        isIndoor: courts.isIndoor,
-        description: courts.description,
-      })
-      .from(courts)
-      .orderBy(courts.id),
-    db.select().from(courtHours).where(eq(courtHours.dayOfWeek, dow)),
-    db
-      .select({
-        courtId: bookingSlots.courtId,
-        hour: bookingSlots.hour,
-        status: bookings.status,
-        code: bookings.code,
-        expiresAt: bookings.expiresAt,
-      })
-      .from(bookingSlots)
-      .innerJoin(bookings, eq(bookingSlots.bookingId, bookings.id))
-      .where(
-        and(eq(bookingSlots.slotDate, dateStr), ne(bookings.status, 'dibatalkan')),
-      ),
-    db.select().from(closures).where(eq(closures.closureDate, dateStr)),
-  ]);
+  const now = Date.now();
+  const { courts, hours, bookings, closures } = await fetchDayInputs(dateStr, dow);
 
   const hoursByCourt = new Map<number, { openHour: number; closeHour: number }>();
-  for (const h of hoursRows) {
-    // court_hours.openTime/closeTime disimpan sebagai teks "HH:MM".
-    const openHour = Number(String(h.openTime).slice(0, 2));
-    const closeHour = Number(String(h.closeTime).slice(0, 2));
-    if (Number.isFinite(openHour) && Number.isFinite(closeHour)) {
-      hoursByCourt.set(h.courtId, { openHour, closeHour });
-    }
+  for (const h of hours) {
+    const openHour = hourOf(h.openTime);
+    const closeHour = hourOf(h.closeTime);
+    if (openHour != null && closeHour != null) hoursByCourt.set(h.courtId, { openHour, closeHour });
   }
 
-  // Default bila tidak ada baris court_hours untuk hari itu (seed awal hanya
-  // men-contoh 1 hari): jam 07:00–23:00 agar grid tetap tampil.
-  const scheduleCourts = courtRows.map((c) => {
-    const fallback = { openHour: 7, closeHour: 23 };
-    const hours = hoursByCourt.get(c.id) ?? fallback;
-    return { ...c, ...hours };
-  });
+  const scheduleCourts = courts.map((c) => ({
+    ...c,
+    ...(hoursByCourt.get(c.id) ?? { openHour: FALLBACK_OPEN, closeHour: FALLBACK_CLOSE }),
+  }));
 
   // Booking aktif per (courtId, hour). Prioritas: terkonfirmasi > menunggu.
-  const booked = new Map<string, { status: DaySlotStatus; code: string | null }>();
-  for (const b of bookingRows) {
-    if (b.status === 'menunggu_pembayaran' && b.expiresAt && b.expiresAt.getTime() < now.getTime()) {
+  const booked = new Map<
+    string,
+    { status: DaySlotStatus; code: string | null; expiresAt: string | null }
+  >();
+  for (const b of bookings) {
+    const expiresAtMs = b.expiresAt ? new Date(b.expiresAt).getTime() : null;
+    if (b.status === 'menunggu_pembayaran' && expiresAtMs != null && expiresAtMs < now) {
       continue; // kedaluwarsa → dianggap kosong (dibersihkan cron expire)
     }
     const key = `${b.courtId}:${b.hour}`;
@@ -110,12 +183,12 @@ export async function getDaySchedule(dateStr: string): Promise<DaySchedule> {
       b.status === 'terkonfirmasi' ? 'terkonfirmasi' : 'menunggu_pembayaran';
     const prev = booked.get(key);
     if (!prev || (prev.status === 'menunggu_pembayaran' && status === 'terkonfirmasi')) {
-      booked.set(key, { status, code: b.code });
+      booked.set(key, { status, code: b.code, expiresAt: b.expiresAt });
     }
   }
 
   const closedAt = (courtId: number, hour: number): string | null => {
-    for (const c of closureRows) {
+    for (const c of closures) {
       if (c.courtId !== courtId) continue;
       if (c.startHour == null || c.endHour == null) return c.reason ?? 'Tutup';
       if (hour >= c.startHour && hour < c.endHour) return c.reason ?? 'Tutup';
@@ -134,7 +207,13 @@ export async function getDaySchedule(dateStr: string): Promise<DaySchedule> {
       }
       const b = booked.get(`${c.id}:${h}`);
       if (b) {
-        slots.push({ courtId: c.id, hour: h, status: b.status, code: b.code });
+        slots.push({
+          courtId: c.id,
+          hour: h,
+          status: b.status,
+          code: b.code,
+          expiresAt: b.status === 'menunggu_pembayaran' ? b.expiresAt : null,
+        });
       } else {
         slots.push({ courtId: c.id, hour: h, status: 'kosong' });
       }
@@ -142,4 +221,59 @@ export async function getDaySchedule(dateStr: string): Promise<DaySchedule> {
   }
 
   return { date: dateStr, dayOfWeek: dow, courts: scheduleCourts, slots };
+}
+
+/**
+ * Jumlah slot kosong untuk rentang tanggal (strip minggu di `/booking`).
+ * Satu query untuk semua hari — menggantikan 7 request × 4 query per page load.
+ */
+export async function getDaysSummary(from: string, to: string): Promise<DaySummary[]> {
+  const rows = (await db.execute(sql`
+    WITH days AS (
+      SELECT generate_series(${from}::date, ${to}::date, interval '1 day')::date AS day
+    ), capacity AS (
+      SELECT d.day, SUM(h.close_hour - h.open_hour)::int AS slots
+      FROM days d
+      JOIN courts c ON c."isActive"
+      LEFT JOIN court_hours ch
+        ON ch."courtId" = c.id AND ch."dayOfWeek" = EXTRACT(DOW FROM d.day)::int
+      CROSS JOIN LATERAL (
+        SELECT
+          COALESCE(EXTRACT(HOUR FROM ch."openTime"::time)::int, ${FALLBACK_OPEN}) AS open_hour,
+          COALESCE(EXTRACT(HOUR FROM ch."closeTime"::time)::int, ${FALLBACK_CLOSE}) AS close_hour
+      ) h
+      GROUP BY d.day
+    ), booked AS (
+      SELECT bs."slotDate" AS day, COUNT(*)::int AS slots
+      FROM booking_slots bs
+      JOIN bookings bk ON bk.id = bs."bookingId"
+      WHERE bs."slotDate" BETWEEN ${from}::date AND ${to}::date
+        AND bk.status <> 'dibatalkan'
+        AND (bk.status = 'terkonfirmasi' OR bk."expiresAt" IS NULL OR bk."expiresAt" > now())
+      GROUP BY bs."slotDate"
+    ), closed AS (
+      SELECT cl."closureDate" AS day, SUM(
+        CASE
+          WHEN cl."startHour" IS NULL OR cl."endHour" IS NULL THEN 24
+          ELSE cl."endHour" - cl."startHour"
+        END
+      )::int AS slots
+      FROM closures cl
+      WHERE cl."closureDate" BETWEEN ${from}::date AND ${to}::date
+      GROUP BY cl."closureDate"
+    )
+    SELECT
+      to_char(d.day, 'YYYY-MM-DD') AS date,
+      GREATEST(
+        COALESCE(capacity.slots, 0) - COALESCE(booked.slots, 0) - COALESCE(closed.slots, 0),
+        0
+      )::int AS "freeCount"
+    FROM days d
+    LEFT JOIN capacity ON capacity.day = d.day
+    LEFT JOIN booked ON booked.day = d.day
+    LEFT JOIN closed ON closed.day = d.day
+    ORDER BY d.day
+  `)) as unknown as Array<{ date: string; freeCount: number }>;
+
+  return rows.map((row) => ({ date: row.date, freeCount: row.freeCount }));
 }

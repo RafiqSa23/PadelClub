@@ -3,7 +3,8 @@ import { db } from '@/db';
 import { bookings, closures } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
-import { getDaySchedule, isValidDateString } from '@/lib/slots';
+import { isValidDateString } from '@/lib/slots';
+import { readDaySchedule } from '@/lib/slot-status';
 import { todayString } from '@/lib/format';
 
 /**
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
     return jsonError('Format date wajib YYYY-MM-DD', 400);
   }
 
-  const schedule = await getDaySchedule(date);
+  const schedule = await readDaySchedule(date);
   const totalSlots = schedule.slots.length;
 
   const dayBookings = await db

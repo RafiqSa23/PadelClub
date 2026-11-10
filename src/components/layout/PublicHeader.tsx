@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Brand, BrandMark } from "./Brand";
 import { MIcon } from "@/components/ui/MIcon";
-import { COURTS } from "@/lib/mock";
+import { COURTS } from "@/lib/mock-data";
 
 const ACTIVE_COURTS = COURTS.filter((court) => court.isActive).length;
 

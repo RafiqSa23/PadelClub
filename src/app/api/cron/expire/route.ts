@@ -4,6 +4,7 @@ import { bookings, payments } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { resolveCustomer } from '@/lib/bookings';
 import { mockSendNotification } from '@/lib/notify-driver';
+import { bumpSlotsVersion } from '@/lib/slot-status';
 
 function isAuthorized(request: Request): boolean {
   const secret = process.env.CRON_SECRET;
@@ -26,12 +27,13 @@ export async function GET(request: Request) {
 
   const now = new Date();
   const stale = await db
-    .select({ id: bookings.id, code: bookings.code })
+    .select()
     .from(bookings)
     .where(and(eq(bookings.status, 'menunggu_pembayaran'), lt(bookings.expiresAt, now)))
     .limit(200);
 
   const codes: string[] = [];
+  const touchedDates = new Set<string>();
   for (const row of stale) {
     try {
       await db.transaction(async (tx) => {
@@ -45,9 +47,9 @@ export async function GET(request: Request) {
           .where(and(eq(payments.bookingId, row.id), eq(payments.status, 'pending')));
       });
       codes.push(row.code);
+      touchedDates.add(row.bookingDate);
       try {
-        const full = await db.select().from(bookings).where(eq(bookings.id, row.id)).limit(1);
-        const customer = full[0] ? await resolveCustomer(full[0]) : { phone: null };
+        const customer = await resolveCustomer(row);
         await mockSendNotification({
           bookingId: row.id,
           channel: 'whatsapp',
@@ -62,6 +64,9 @@ export async function GET(request: Request) {
       // Lanjut ke booking berikutnya — cron berikutnya mencoba lagi.
     }
   }
+
+  // Slot yang dibebaskan mengubah jadwal — naikkan versi per tanggal tersentuh.
+  for (const date of touchedDates) bumpSlotsVersion(date);
 
   return jsonOk({ expiredCount: codes.length, codes });
 }

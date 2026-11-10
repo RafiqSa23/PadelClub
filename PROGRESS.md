@@ -24,6 +24,9 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S11 | Seed data (6 lapangan + jam 7 hari + admin) + `npm run db:seed` | ✅ | Idempotent, bisa diulang (2026-09-30) |
 | S12 | Lib backend shared (slots, session HMAC, rate-limit, payment/notify mock driver) | ✅ | `src/lib/*.ts` (2026-09-30) |
 | S13 | Auth admin backend (scrypt + sesi DB, ganti cookie demo) | ✅ | `POST /api/admin/login|logout`, `GET /api/admin/me` (2026-09-30) |
+| S14 | Index hot-path + connection pool DB | ✅ | Migrasi `0003` (11 index: cron, riwayat, grid, OTP, log) + `max: 5` di `src/db/index.ts` (2026-11-10) |
+| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (3 file, ≤45 request), guard DB test + localhost, `npm run test:api` (2026-11-10) |
+| S16 | Polling jadwal hemat (cache + versi + delta 304) | ✅ | `src/lib/slot-status.ts`, `GET /api/slots/status`, `getDaySchedule` 1 roundtrip, strip minggu 1 request (2026-11-10) |
 
 ## Fitur MVP — Sisi Customer
 
@@ -34,11 +37,11 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | F1 | Pencarian slot (tanggal → lapangan → jam) | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f1--pencarian-slot) |
 | F2 | Keranjang booking multi-jam | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f2--keranjang-booking-multi-jam) |
 | F3 | Checkout cepat (nomor HP + OTP) | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f3--checkout-cepat-nomor-hp--otp) |
-| F4 | Pembayaran QRIS otomatis | ✅¹ | ✅ | [03](docs/03-spesifikasi-fitur.md#f4--pembayaran-qris-otomatis) |
+| F4 | Pembayaran via Midtrans Snap popup (semua metode) | ✅¹ | ✅ | [03](docs/03-spesifikasi-fitur.md#f4--pembayaran-qris-otomatis) |
 | F5 | Tiket/bukti booking digital | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f5--tiket--bukti-booking-digital) |
 | F6 | Pengingat otomatis (WhatsApp + Email) | —³ | ✅ | [03](docs/03-spesifikasi-fitur.md#f6--pengingat-otomatis-whatsapp--email) |
 
-> ¹ Visual QR masih render dekoratif dari payload string asli (`MOCK-QRIS:…`, belum QR valid terpindai — menunggu driver Midtrans). ³ F6 berjalan latar belakang (cron + notifikasi) — tidak ada antarmuka pengguna.
+> ¹ Snap popup (ADR 0008, 2026-10-01) menggantikan QR Core API: charge mengembalikan `snapToken`, tombol "Bayar Sekarang" + fallback link tab baru; sukses → auto-redirect ke tiket. Driver mock tetap jalur QR dekoratif (`MOCK-QRIS:…`) + simulasi-bayar untuk lokal. ³ F6 berjalan latar belakang (cron + notifikasi) — tidak ada antarmuka pengguna.
 
 ## Fitur MVP — Sisi Admin
 
@@ -57,7 +60,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | Halaman | Deskripsi | Status | Catatan |
 |---|---|---|---|
 | `/` | Landing page | ✅ | UI + token brand |
-| `/booking` | Wizard booking multi-step | ✅ | Charge QR mock + countdown expiry server + polling 5 dtk + simulasi-bayar + state kedaluwarsa (`/api/payments/*`, `/api/webhooks/payment`); QR valid menunggu Midtrans |
+| `/booking` | Wizard booking multi-step | ✅ | Snap popup + countdown expiry server + polling 5 dtk + auto-redirect ke tiket (`/api/payments/*`, `/api/webhooks/payment` per-transaksi override); driver mock (QR dekoratif + simulasi-bayar) untuk lokal |
 | `/login` | Login/registrasi nomor HP + OTP | ✅ | Real OTP + sesi `padel_session` (mode dev tampilkan kode) |
 | `/tiket/:kode` | Tiket/bukti digital (tanpa login) | ✅ | Real: `GET /api/tickets/:kode` + notice Batal/Tutup + status check-in; toggle publik dihapus (check-in khusus admin) |
 | `/riwayat` | Riwayat booking pemain | ✅ | Real: `GET /api/me/bookings` (+ `/api/courts` sidebar); butuh sesi OTP, ada CTA login |
@@ -103,13 +106,33 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 - **B7 laporan:** JSON ringkasan + per lapangan OK; CSV terunduh (`attachment`, header BOM); filter `courtId` OK; 401 tanpa sesi; 400 tanggal invalid. **Temuan & perbaikan:** `addDaysIso` memakai aritmetika tanggal lokal → di WIB selalu kembalikan 366 hari (error palsu); diganti UTC murni + `todayLocal()` (juga di cron reminders).
 
 ### UI / produk yang masih demo
-- QR valid terpindai menunggu driver Midtrans (payload mock sudah real, visual masih dekoratif). (→ pasca-MVP/sandbox)
+- Driver mock dipertahankan untuk lokal (QR dekoratif + simulasi-bayar); kunci Midtrans hanya di `.env` (gitignored) — tidak pernah di-commit. (→ sandbox/produksi)
 - `src/lib/mock.ts` dipertahankan untuk landing, header publik, seed, dan simulator monitoring (sudah tak dipakai alur operasional).
 
 ### Teknis
 - Gambar eksternal memakai `unoptimized`; `next.config.ts` belum memiliki `remotePatterns`.
 - `EmptyState` dipakai untuk kondisi kosong kartu/tabel; pengecualian disengaja: papan TV (`papan-jadwal`, tema gelap), empty-state kamera scanner (ikon QR), dan not-found tiket (punya dua aksi).
 - Repo: hampir semua kerja frontend belum di-commit (repo masih 1 commit awal).
+- `npm run lint` + `typecheck` + `build` hijau; perbaikan `set-state-in-effect` di `/booking` memakai `useSyncExternalStore` (`src/lib/use-snap.ts`).
+
+### Performa jadwal (`/api/slots`)
+- `getDaySchedule` kini **satu roundtrip** (4 CTE + `json_agg`) — sebelumnya 4 query paralel yang menghabiskan 4 koneksi pool sekaligus.
+- Cache per tanggal 5 detik (`SLOTS_CACHE_TTL_MS`) + versi per tanggal; penulis (booking, webhook, admin confirm/cancel, closure, cron expire) memanggil `bumpSlotsVersion()`.
+- `GET /api/slots/status?date=&v=` membalas **304** bila tidak ada perubahan — polling 10 detik tidak menyentuh DB.
+- Strip 7 tanggal memakai `GET /api/slots?from=&to=` (satu query), bukan 7 request.
+- Slot `menunggu_pembayaran` membawa `expiresAt`; klien mengubahnya jadi kosong sendiri saat kedaluwarsa.
+- Polling berhenti saat tab tidak terlihat (`visibilitychange`).
+
+### Uji otomatis
+- Jalankan: `cp .env.test.example .env.test` → `npm run db:migrate:test && npm run db:seed:test` → `npm run dev:test` (terminal 1) → `npm run test:api` (terminal 2).
+- Serial (1 worker), ±41 request per run, tanpa load/stress test. Cleanup hanya menghapus baris nomor HP test + closure `TEST-*`.
+- Guard: tolak `TEST_BASE_URL` non-lokal, tolak DB yang sama dengan `.env`, dan butuh nama DB ber-`test` atau `TEST_DB_CONFIRMED="1"`.
+
+### Kesiapan produksi (belum selesai)
+- Notifikasi WA/Email masih `mockSendNotification` (PRD Q5 terbuka).
+- Cron F4/F6 butuh scheduler eksternal (belum ada config di repo).
+- Kredensial Midtrans: isi hanya di `.env`; key yang pernah tertulis di `.env.example` wajib di-rotate di dashboard Midtrans.
+- Alur bayar Midtrans sandbox belum diuji end-to-end (butuh URL publik + key valid).
 
 ## Cara Memperbarui
 

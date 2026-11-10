@@ -34,6 +34,9 @@ Seed admin: `admin / admin123` — change the password after first login
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:generate` / `db:migrate` / `db:studio` | Drizzle Kit |
 | `npm run db:seed` | Seed courts, hours, admin (`tsx src/db/seed.ts`) |
+| `npm test` / `npm run test:api` | HTTP API tests (serial, ≤45 requests) |
+| `npm run dev:test` | Dev server on port 3100 against the **test** DB |
+| `npm run db:migrate:test` / `db:seed:test` | Migrate/seed the test DB (`.env.test`) |
 
 ## Project Structure
 
@@ -49,10 +52,49 @@ Seed admin: `admin / admin123` — change the password after first login
 
 ## Customer Flow
 
-`/booking` (slot grid → review → HP + OTP → QRIS) → `/tiket/:kode` (no login)
-→ `/riwayat` (OTP session). Payment is a **mock driver** by default
-(`PAYMENT_DRIVER="mock"`, payload `MOCK-QRIS:ORD-<code>:<amount>`); swap in the
-Midtrans driver (ADR 0007) without touching the UI.
+`/booking` (slot grid → review → HP + OTP → Snap popup) → `/tiket/:kode` (no login)
+→ `/riwayat` (OTP session). Payment defaults to a **mock driver**
+(`PAYMENT_DRIVER="mock"`, payload `MOCK-QRIS:ORD-<code>:<amount>`); switch to Midtrans
+Snap popup (ADR 0008) by filling `MIDTRANS_*` in `.env`. The UI is unchanged either way.
+
+## Slot Availability
+
+The booking grid is fetched once (`GET /api/slots?date=…`, one DB roundtrip) and then
+polled through `GET /api/slots/status?date=…&v=<version>`, which answers **304** while
+nothing changed — so a 10-second refresh costs no query. Writes that free or take a slot
+(booking, payment webhook, admin confirm/cancel, closure, cron expire) call
+`bumpSlotsVersion()`. Per-date schedule cache is 5 s (`SLOTS_CACHE_TTL_MS`), and the
+7-day strip uses one range request (`?from=&to=`). Slots awaiting payment carry
+`expiresAt`, so the client unlocks them locally at the right second, and polling pauses
+while the tab is hidden.
+
+## Testing
+
+HTTP tests hit a running server — they never start one themselves and never run
+in parallel (1 worker, sequential files, ≤45 requests per run) so dev/prod servers
+are not hammered.
+
+```bash
+cp .env.test.example .env.test   # DATABASE_URL must point at a SEPARATE test DB
+npm run db:migrate:test
+npm run db:seed:test
+npm run dev:test                 # terminal 1 — port 3100, test DB, mock drivers
+npm run test:api                 # terminal 2
+```
+
+Guards: refuses non-localhost `TEST_BASE_URL` (unless `ALLOW_REMOTE_TESTS=1`), refuses
+the same database as `.env` (the real hazard — tests delete rows), and requires a
+test-looking DB name. Neon names its default database `neondb`, so either rename it
+(`ALTER DATABASE neondb RENAME TO padelclub_test`) or set `TEST_DB_CONFIRMED="1"` in
+`.env.test` when that database is dedicated to tests. Escape hatch for a deliberate
+one-off: `ALLOW_NON_TEST_DB=1`. Cleanup only deletes rows for the test phone numbers
+and closures labelled `TEST-*`. No load/stress tests live in this repo.
+
+| File | Covers |
+|---|---|
+| `tests/api/01-customer-flow.test.ts` | F1–F5: slots, delta 304, OTP, booking, charge, webhook, ticket, history |
+| `tests/api/02-admin-flow.test.ts` | F7–F11: login, dashboard, walk-in, check-in, closures, reports |
+| `tests/api/03-guards.test.ts` | Auth guards (401), 404, input validation (400) |
 
 ## Scheduled Jobs
 

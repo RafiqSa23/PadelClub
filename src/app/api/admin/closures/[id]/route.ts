@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { closures } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
+import { bumpSlotsVersion } from '@/lib/slot-status';
 
 export async function DELETE(
   _request: Request,
@@ -17,7 +18,9 @@ export async function DELETE(
 
   const deleted = await db.delete(closures).where(eq(closures.id, closureId)).returning({
     id: closures.id,
+    closureDate: closures.closureDate,
   });
   if (deleted.length === 0) return jsonError('Closure tidak ditemukan', 404);
-  return jsonOk({ deleted: deleted[0] });
+  bumpSlotsVersion(deleted[0].closureDate);
+  return jsonOk({ deleted: { id: deleted[0].id } });
 }

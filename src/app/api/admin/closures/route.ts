@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { closures } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
+import { bumpSlotsVersion } from '@/lib/slot-status';
 import { isValidDateString } from '@/lib/slots';
 
 export async function GET(request: Request) {
@@ -63,5 +64,6 @@ export async function POST(request: Request) {
     .insert(closures)
     .values({ courtId, closureDate: date, startHour, endHour, reason: reason ?? null })
     .returning();
+  bumpSlotsVersion(date);
   return jsonOk({ closure: inserted[0] }, 201);
 }

@@ -3,7 +3,8 @@ import { db } from '@/db';
 import { bookingSlots, bookings, users } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
-import { getDaySchedule, isValidDateString } from '@/lib/slots';
+import { isValidDateString } from '@/lib/slots';
+import { readDaySchedule } from '@/lib/slot-status';
 
 /**
  * Jadwal harian untuk admin (F7 read-model): grid slot + detail booking
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
     return jsonError('Parameter date wajib format YYYY-MM-DD', 400);
   }
 
-  const schedule = await getDaySchedule(date);
+  const schedule = await readDaySchedule(date);
 
   const rows = await db
     .select({

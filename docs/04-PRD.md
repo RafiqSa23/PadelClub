@@ -59,7 +59,7 @@ Aplikasi web booking padel yang menampilkan grid slot real-time, memungkinkan pe
 - ❌ Turnamen, ranking, atau fitur komunitas
 - ❌ Loyalty point, voucher, referral
 - ❌ Aplikasi native (iOS/Android) — MVP web responsive
-- ❌ Pembayaran selain QRIS
+- ~~❌ Pembayaran selain QRIS~~ — **dicabut 2026-10-01**: pembayaran via Midtrans Snap membuka semua metode (pengecualian disetujui Product Owner, [ADR 0008](06-adr/0008-snap-popup-pengganti-core-api.md))
 - ❌ Membership langganan (masuk v2.0)
 
 ---
@@ -87,7 +87,7 @@ Web App (Customer / Admin) → API Backend → Database
 ```
 
 ### 4.2 Integration Points
-- **Payment Gateway:** **Midtrans** — Core API QRIS (charge → QR ditampilkan di halaman), webhook + fallback polling ([ADR 0001](06-adr/0001-qris-pihak-ketiga.md), [ADR 0007](06-adr/0007-payment-gateway-midtrans.md)).
+- **Payment Gateway:** **Midtrans** — **Snap popup** (`snap.pay` di halaman `/booking`, semua metode pembayaran; sebelumnya Core API QRIS — digantikan [ADR 0008](06-adr/0008-snap-popup-pengganti-core-api.md)). Webhook + fallback polling ([ADR 0001](06-adr/0001-qris-pihak-ketiga.md), [ADR 0007](06-adr/0007-payment-gateway-midtrans.md) — digantikan ADR 0008).
 - **Auth OTP:** dikirim via adapter notifikasi — penyedia final menunggu **Q5**; pada fase MVP memakai driver mock ([ADR 0003](06-adr/0003-notifikasi.md)).
 - **Notifikasi WhatsApp:** sama — driver adapter; penyedia WhatsApp Business API/gateway = **Q5** (masih terbuka).
 - **Email:** driver adapter email transactional; penyedia final = **Q5**; fase MVP memakai driver mock.

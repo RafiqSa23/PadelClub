@@ -417,7 +417,7 @@ export default function TicketPage() {
                           : "bg-pending-light font-semibold text-pending-ink"
                       }`}
                     >
-                      {paid ? "QRIS INSTANT LUNAS" : "QRIS BELUM DIBAYAR"}
+                      {paid ? "LUNAS" : "MENUNGGU PEMBAYARAN"}
                     </span>
                   </div>
                   <div className="flex justify-between gap-3 pt-1.5">

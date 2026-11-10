@@ -318,11 +318,11 @@ curl http://localhost:3100/api/me/bookings -b cust.txt
 
 ---
 
-## 5c. Endpoint Pembayaran — QRIS & Expiry
+## 5c. Endpoint Pembayaran — Snap & Expiry
 
-> F4 — Pembayaran QRIS otomatis. Driver `mock` (tanpa kredensial): QR berupa payload teks `MOCK-QRIS:ORD-<kode>:<amount>` — visual di halaman masih dekoratif sampai driver Midtrans (ADR 0007) tiba. Expiry 15 menit server-side (ADR 0006); sumber kebenaran expiry tetap `bookings.expiresAt`.
+> F4 — Pembayaran via Midtrans **Snap popup** (ADR 0008, 2026-10-01; menggantikan QR Core API ADR 0007). Driver `midtrans`: charge mengembalikan `snapToken` (+ `redirectUrl`) untuk `snap.pay()`; semua metode pembayaran aktif. Driver `mock` (tanpa kredensial): QR berupa payload teks `MOCK-QRIS:ORD-<kode>:<amount>` (dekoratif, lokal saja). Expiry 15 menit server-side (ADR 0006); sumber kebenaran expiry tetap `bookings.expiresAt`. Webhook dikirim per transaksi via `X-Override-Notification` (tanpa setting dashboard) bila `APP_PUBLIC_URL` diisi.
 
-### 5c.1 `POST /api/payments/:code/charge` — charge QRIS (idempoten)
+### 5c.1 `POST /api/payments/:code/charge` — charge Snap/QR (idempoten)
 
 Charge ulang selama belum kedaluwarsa mengembalikan payload yang sama. Tanpa auth (kode booking bersifat rahasia per transaksi); rate-limit 10/mnt per kode.
 
@@ -337,7 +337,11 @@ curl -X POST http://localhost:3100/api/payments/PD-YTZE3G/charge
     "orderId": "ORD-PD-YTZE3G",
     "amount": 70000,
     "status": "pending",
-    "qrString": "MOCK-QRIS:ORD-PD-YTZE3G:70000",
+    "gateway": "midtrans",
+    "qrString": null,
+    "qrImageUrl": null,
+    "snapToken": "b3bb2da4-...-midtrans-snap-token",
+    "redirectUrl": "https://app.sandbox.midtrans.com/snap/v4/redirection/…",
     "expiresAt": "2026-09-30T12:11:23.920Z"
   },
   "booking": {
@@ -372,7 +376,9 @@ curl http://localhost:3100/api/payments/PD-YTZE3G/status
     "orderId": "ORD-PD-YTZE3G",
     "amount": 70000,
     "status": "paid",
+    "gateway": "midtrans",
     "qrString": "MOCK-QRIS:ORD-PD-YTZE3G:70000",
+    "snapToken": null,
     "expiresAt": "2026-09-30T12:11:23.920Z",
     "paidAt": "2026-09-30T12:12:01.000Z"
   }

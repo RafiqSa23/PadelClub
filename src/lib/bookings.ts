@@ -10,6 +10,7 @@ import {
   users,
 } from '@/db/schema';
 import { uniqueBookingCode } from './booking-code';
+import { bumpSlotsVersion } from './slot-status';
 import { dayOfWeekOf } from './slots';
 
 export const BOOKING_EXPIRY_MINUTES = 15; // ADR 0006
@@ -127,7 +128,7 @@ export async function createBookingTx(input: CreateBookingInput) {
   const expiresAt = input.paid ? null : new Date(now.getTime() + BOOKING_EXPIRY_MINUTES * 60_000);
 
   try {
-    return await db.transaction(async (tx) => {
+    const created = await db.transaction(async (tx) => {
       const insertedBooking = await tx
         .insert(bookings)
         .values({
@@ -170,6 +171,9 @@ export async function createBookingTx(input: CreateBookingInput) {
 
       return { booking, hours, payment };
     });
+    // Ketersediaan berubah: gugurkan cache + naikkan versi jadwal tanggal ini.
+    bumpSlotsVersion(input.date);
+    return created;
   } catch (err) {
     if (isUniqueViolation(err)) {
       throw new ConflictError('Slot baru saja dipesan pihak lain. Pilih jam lain.');

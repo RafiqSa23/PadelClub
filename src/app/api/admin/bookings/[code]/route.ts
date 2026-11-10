@@ -3,6 +3,7 @@ import { db } from '@/db';
 import { bookings, payments } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
+import { bumpSlotsVersion } from '@/lib/slot-status';
 
 /**
  * Aksi remediasi booking (F10): `confirm` (menunggu → terkonfirmasi,
@@ -44,6 +45,7 @@ export async function PATCH(
         .set({ status: 'paid', paidAt: now })
         .where(and(eq(payments.bookingId, booking.id), eq(payments.status, 'pending')));
     });
+    bumpSlotsVersion(booking.bookingDate);
     return jsonOk({ booking: { code: booking.code, status: 'terkonfirmasi' } });
   }
 
@@ -61,5 +63,6 @@ export async function PATCH(
       .set({ status: 'expired' })
       .where(and(eq(payments.bookingId, booking.id), eq(payments.status, 'pending')));
   });
+  bumpSlotsVersion(booking.bookingDate);
   return jsonOk({ booking: { code: booking.code, status: 'dibatalkan' } });
 }

@@ -8,6 +8,7 @@ import { Field, OTPInput, PhoneInput, TextInput } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { IconAlert, IconCheckCircle, IconShield, IconTicket } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import { isValidPhone } from "@/lib/phone";
 
 const RESEND_COOLDOWN = 60;
 
@@ -49,8 +50,8 @@ export default function LoginPage() {
 
   async function sendOtp(event?: React.FormEvent) {
     event?.preventDefault();
-    if (!name.trim() || phone.replace(/\D/g, "").length < 9) {
-      setError("Isi nama dan nomor HP yang valid terlebih dahulu.");
+    if (!name.trim() || !isValidPhone(phone)) {
+      setError("Isi nama dan nomor HP yang valid terlebih dahulu (contoh: 0812…).");
       return;
     }
     setError(undefined);
@@ -129,7 +130,7 @@ export default function LoginPage() {
               <Field label="Nama" htmlFor="name" hint="Nama akan tampil di tiket booking.">
                 <TextInput id="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="cth: Raka Pratama" autoComplete="name" />
               </Field>
-              <Field label="Nomor HP (WhatsApp)" htmlFor="phone">
+              <Field label="Nomor HP (WhatsApp)" htmlFor="phone" hint="Awalan +62 sudah terisi — cukup tulis 08… atau 812….">
                 <PhoneInput id="phone" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="812 3456 7890" autoComplete="tel" />
               </Field>
               {error && <p className="flex items-center gap-2 text-sm font-semibold text-danger" role="alert"><IconAlert size={16} /> {error}</p>}

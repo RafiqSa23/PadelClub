@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import type { Court, Slot } from './types';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Court, Slot, SlotStatus } from './types';
 import type { DaySchedule } from './slots';
 
 interface ScheduleState {
@@ -10,6 +10,31 @@ interface ScheduleState {
   loading: boolean;
   error: string | null;
   refresh: () => void;
+}
+
+/** Interval polling ringan; server balas 304 bila tak ada perubahan. */
+const POLL_MS = 10_000;
+
+interface SlotPatch {
+  courtId: number;
+  hour: number;
+  status: SlotStatus;
+  code?: string | null;
+  reason?: string | null;
+  expiresAt?: string | null;
+}
+
+/**
+ * Slot `menunggu_pembayaran` yang `expiresAt`-nya lewat langsung dianggap
+ * kosong di klien — tanpa request, tanpa menunggu cron.
+ */
+function effectiveStatus(patch: {
+  status: SlotStatus;
+  expiresAt?: string | null;
+}): SlotStatus {
+  if (patch.status !== 'menunggu_pembayaran') return patch.status;
+  if (!patch.expiresAt) return patch.status;
+  return new Date(patch.expiresAt).getTime() <= Date.now() ? 'kosong' : patch.status;
 }
 
 function mapSchedule(date: string, schedule: DaySchedule): { courts: Court[]; slots: Slot[] } {
@@ -25,80 +50,154 @@ function mapSchedule(date: string, schedule: DaySchedule): { courts: Court[]; sl
     courtId: s.courtId,
     date,
     hour: s.hour,
-    status: s.status,
+    status: effectiveStatus({ status: s.status, expiresAt: s.expiresAt }),
     code: s.code ?? undefined,
     reason: s.reason ?? undefined,
+    expiresAt: s.expiresAt ?? undefined,
   }));
   return { courts, slots };
 }
 
-/** Ambil jadwal 1 tanggal dari API (refresh tiap 10 dtk, sesuai label UI). */
+/**
+ * Jadwal 1 tanggal: grid penuh sekali saat halaman dibuka, lalu polling delta
+ * (`/api/slots/status`) yang berhenti di 304 selama tidak ada perubahan.
+ */
 export function useDaySchedule(date: string): ScheduleState {
   const [courts, setCourts] = useState<Court[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
+  const versionRef = useRef(-1);
+  const [reloadToken, setReloadToken] = useState(0);
 
   const refresh = useCallback(() => {
+    versionRef.current = -1;
     setLoading(true);
-    setTick((t) => t + 1);
+    setReloadToken((token) => token + 1);
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/slots?date=${date}`, { cache: 'no-store' })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = (await res.json()) as { schedule: DaySchedule };
-        if (cancelled) return;
-        const mapped = mapSchedule(date, json.schedule);
-        setCourts(mapped.courts);
-        setSlots(mapped.slots);
-        setError(null);
-      })
+
+    function applySchedule(next: DaySchedule): void {
+      const mapped = mapSchedule(date, next);
+      setCourts(mapped.courts);
+      setSlots(mapped.slots);
+    }
+
+    function applyPatch(changes: SlotPatch[]): void {
+      if (changes.length === 0) return;
+      setSlots((prev) => {
+        const byKey = new Map(changes.map((c) => [`${c.courtId}:${c.hour}`, c]));
+        let touched = false;
+        const next = prev.map((slot) => {
+          const patch = byKey.get(`${slot.courtId}:${slot.hour}`);
+          if (!patch) return slot;
+          touched = true;
+          return {
+            ...slot,
+            status: effectiveStatus(patch),
+            code: patch.code ?? undefined,
+            reason: patch.reason ?? undefined,
+            expiresAt: patch.expiresAt ?? undefined,
+          };
+        });
+        return touched ? next : prev;
+      });
+    }
+
+    async function loadFull(): Promise<void> {
+      const res = await fetch(`/api/slots?date=${date}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { schedule: DaySchedule; v?: number };
+      if (cancelled) return;
+      versionRef.current = typeof json.v === 'number' ? json.v : -1;
+      applySchedule(json.schedule);
+      setError(null);
+    }
+
+    async function poll(): Promise<void> {
+      // Tab tidak terlihat → jangan tembak server sama sekali.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const version = versionRef.current;
+      if (version < 0) {
+        await loadFull();
+        return;
+      }
+      const res = await fetch(`/api/slots/status?date=${date}&v=${version}`, {
+        cache: 'no-store',
+      });
+      if (res.status === 304) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as
+        | { v: number; full: true; schedule: DaySchedule }
+        | { v: number; full: false; slots: SlotPatch[] };
+      if (cancelled) return;
+      if (typeof json.v === 'number') versionRef.current = json.v;
+      if (json.full) applySchedule(json.schedule);
+      else applyPatch(json.slots);
+      setError(null);
+    }
+
+    loadFull()
       .catch(() => {
         if (!cancelled) setError('Gagal memuat slot terkini. Coba muat ulang.');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    const timer = window.setInterval(() => setTick((t) => t + 1), 10_000);
+
+    const timer = window.setInterval(() => {
+      void poll().catch(() => {
+        // Biarkan diam: poll berikutnya mencoba lagi (jangan spam error di UI).
+      });
+    }, POLL_MS);
+
+    function onVisibilityChange(): void {
+      if (document.visibilityState === 'visible') {
+        void poll().catch(() => undefined);
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [date, tick]);
+  }, [date, reloadToken]);
 
   return { courts, slots, loading, error, refresh };
 }
 
-/** Hitung slot kosong untuk strip tanggal (7 tanggal paralel). */
+/**
+ * Jumlah slot kosong untuk strip tanggal — SATU request untuk seluruh rentang
+ * (sebelumnya 7 request × 4 query tiap halaman dibuka).
+ */
 export function useWeekAvailability(dates: string[]): Record<string, number> {
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const from = dates[0] ?? '';
+  const to = dates[dates.length - 1] ?? '';
 
   useEffect(() => {
+    if (!from || !to) return;
     let cancelled = false;
-    Promise.all(
-      dates.map(async (date) => {
-        try {
-          const res = await fetch(`/api/slots?date=${date}`, { cache: 'no-store' });
-          if (!res.ok) return [date, -1] as const;
-          const json = (await res.json()) as { schedule: DaySchedule };
-          return [date, json.schedule.slots.filter((s) => s.status === 'kosong').length] as const;
-        } catch {
-          return [date, -1] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setCounts(Object.fromEntries(entries.filter(([, v]) => v >= 0)));
-    });
+
+    fetch(`/api/slots?from=${from}&to=${to}`, { cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = (await res.json()) as { days: { date: string; freeCount: number }[] };
+        if (cancelled) return;
+        setCounts(Object.fromEntries(json.days.map((day) => [day.date, day.freeCount])));
+      })
+      .catch(() => {
+        // Strip tanggal bersifat pelengkap — biarkan kosong bila gagal.
+      });
+
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dates.join(',')]);
+  }, [from, to]);
 
   return counts;
 }
