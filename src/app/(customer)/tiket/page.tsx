@@ -37,8 +37,8 @@ export default function TicketLookupPage() {
             Cari e-ticket Anda
           </h1>
           <p className="mt-2 max-w-sm text-body-md text-slate-whisper">
-            Masukkan kode booking (contoh: PD-A1B2C3) yang dikirim lewat WhatsApp atau email
-            setelah pembayaran.
+            Masukkan kode booking (contoh: PD-A1B2C3). Tiket hanya bisa dibuka setelah
+            masuk ke akun Anda dan hanya untuk booking milik Anda.
           </p>
         </div>
 
@@ -67,7 +67,7 @@ export default function TicketLookupPage() {
 
         <p className="mt-5 flex items-start gap-2 rounded-xl bg-mist-shadow p-3 text-body-sm text-slate-whisper">
           <MIcon name="info" className="mt-0.5 text-[16px] text-court-green-deep" />
-          Tiket dapat dibuka tanpa login. Kode booking juga tersimpan di email konfirmasi.
+          Tiket hanya dapat dibuka setelah masuk ke akun, dan hanya untuk booking milik Anda.
         </p>
       </div>
 

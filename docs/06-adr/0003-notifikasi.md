@@ -1,6 +1,6 @@
 # ADR 0003 — Notifikasi Otomatis Melalui WhatsApp + Email
 
-- **Status:** Accepted
+- **Status:** Superseded oleh [ADR 0010](0010-mvp-tanpa-notifikasi.md) (2026-11-12)
 - **Tanggal:** 2026-09-22
 - **Pemilik:** Product Owner & Tech Lead
 

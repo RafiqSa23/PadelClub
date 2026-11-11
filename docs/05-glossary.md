@@ -7,6 +7,7 @@ Glossary berisi istilah yang dipakai konsisten di seluruh dokumen produk.
 |---|---|
 | **Admin / Pemilik** | Pengguna yang mengelola lapangan (jadwal, booking, lapangan, laporan). |
 | **Analytics Funnel** | Pengukuran langkah demi langkah yang dilalui pelanggan hingga menyelesaikan booking. |
+| **Anonimisasi** | Penghapusan data pribadi (nama, nomor HP, email) dari baris user tanpa menghapus booking historis ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)). |
 
 ## B
 | Istilah | Definisi |
@@ -56,22 +57,28 @@ Glossary berisi istilah yang dipakai konsisten di seluruh dokumen produk.
 | Istilah | Definisi |
 |---|---|
 | **Okupansi** | Persentase slot terpakai dibandingkan slot tersedia pada suatu periode. |
-| **OTP** | One-Time Password — kode sekali pakai untuk verifikasi nomor HP. |
+| **OTP** | One-Time Password — kode sekali pakai untuk verifikasi nomor HP. **Tidak dipakai di MVP** ([ADR 0009](06-adr/0009-akun-email-password.md)). |
 
 ## P
 | Istilah | Definisi |
 |---|---|
 | **Payment Gateway** | Penyedia layanan pembayaran yang memproses transaksi QRIS (mis. Midtrans/Xendit/Duitku). |
-| **Pemandu Notifikasi** | Sistem/Penyedia pengiriman pesan WhatsApp, Email, atau SMS otomatis. |
+| **Pemandu Notifikasi** | Sistem/Penyedia pengiriman pesan WhatsApp, Email, atau SMS otomatis. **Ditunda ke v2.0** ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)). |
 
 ## Q
 | Istilah | Definisi |
 |---|---|
 | **QRIS** | Quick Response Code Indonesian Standard — standar pembayaran QR tunggal yang dapat dipindai semua e-wallet/bank di Indonesia. |
 
+## R
+| Istilah | Definisi |
+|---|---|
+| **Retensi 7 Hari** | Batas penyimpanan kontak user bayangan walk-in sebelum dianonimisasi otomatis ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)). |
+
 ## S
 | Istilah | Definisi |
 |---|---|
+| **Sesi (`padel_session`)** | Cookie bertanda tangan yang menyimpan `userId` setelah pemain login. |
 | **Slot** | Satu unit unit waktu tersewa (1 jam) pada lapangan & tanggal tertentu. |
 | **Sitemap** | Peta/struktur halaman aplikasi. |
 
@@ -79,7 +86,12 @@ Glossary berisi istilah yang dipakai konsisten di seluruh dokumen produk.
 | Istilah | Definisi |
 |---|---|
 | **Terkonfirmasi** | Status booking yang sudah dibayar dan sah. |
-| **Tiket Digital** | Bukti booking elektronik berisi kode unik & detail jadwal. |
+| **Tiket Digital** | Bukti booking elektronik berisi kode unik & detail jadwal; diakses lewat akun atau tautan, tidak dikirim via WhatsApp/Email. |
+
+## U
+| Istilah | Definisi |
+|---|---|
+| **User Bayangan** | Baris user `is_guest` untuk pelanggan walk-in/telepon: nama + HP tanpa email/password; dianonimisasi setelah 7 hari tanpa booking aktif. |
 
 ## W
 | Istilah | Definisi |

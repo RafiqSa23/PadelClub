@@ -14,7 +14,6 @@ export {
   COURT_HOURS,
   COURTS,
   HOURS,
-  MOCK_OTP,
 } from "./mock-data";
 
 // Logic (fungsi yang bergantung pada data di atas)

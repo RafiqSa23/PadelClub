@@ -2,20 +2,20 @@
 
 ## 1. Prinsip UX yang Dipegang
 
-- **"3 klik & 2 menit"** — booking selesai dalam 3 klik utama dan waktu maksimal 2 menit.
-- **Tanpa login wajib di awal** — login (nomor HP + OTP) hanya diperlukan saat checkout.
+- **Checkout ringkas** — booking selesai dalam beberapa klik; akun dibuat sekali saat booking pertama.
+- **Login hanya saat checkout** — pemain bebas melihat jadwal & harga, tetapi wajib punya akun (email + password) sebelum memesan ([ADR 0009](06-adr/0009-akun-email-password.md)).
 - **Transparansi harga** — harga per jam dan biaya tambahan tampil sejak halaman pencarian.
 - **Feedback setiap aksi** — klik slot langsung memberi respons visual (perubahan warna grid).
 - **Satu sumber kebenaran** — status slot selalu sama untuk customer & admin (data real-time).
 
 ---
 
-## 2. Alur Pemain (Customer) — 8 Langkah
+## 2. Alur Pemain (Customer) — 7 Langkah
 
 ### Diagram Alur
 ```
 Landing Page → Pilih Tanggal → Pilih Lapangan & Jam → Review Order
-        → Masukkan Nomor HP (OTP) → Bayar QRIS → Tiket Digital → Pengingat Otomatis
+        → Daftar / Masuk (email + password) → Bayar → Tiket Digital
 ```
 
 ### Detail Langkah
@@ -26,16 +26,15 @@ Landing Page → Pilih Tanggal → Pilih Lapangan & Jam → Review Order
 | 2 | Pilih Tanggal | Klik tanggal di kalender | Kalender menandai tanggal libur/tutup, menampilkan harga/hari | Tanggal terpilih ter-highlight |
 | 3 | Pilih Lapangan & Jam | Klik 1–beberapa slot jam di grid lapangan | Grid menampilkan warna status slot; menghitung subtotal saat slot dipilih | Slot terpilih berubah warna, subtotal tampil live |
 | 4 | Review Order | Verifikasi ringkasan booking → klik **"Lanjut ke Pembayaran"** | Menampilkan detail lengkap (lapangan, tanggal, jam, durasi, harga, biaya) | Ringkasan yang jelas dan tidak ambigu |
-| 5 | Nomor HP + OTP | Input nomor HP & nama, verifikasi kode OTP | Mengirim OTP via WhatsApp (fallback SMS), memvalidasi kode | Akun terverifikasi cepat tanpa password |
-| 6 | Bayar QRIS | Pindai/menampilkan QRIS, konfirmasi pembayaran | Payment gateway memvalidasi pembayaran; webhook memperbarui status booking | Status otomatis menjadi **Terkonfirmasi** |
-| 7 | Tiket Digital | Lihat tiket, unduh/bagikan | Menampilkan kode booking + detail lengkap + tautan akses tanpa login | Bukti valid yang bisa dibagikan ke grup |
-| 8 | Pengingat Otomatis | (tidak perlu tindakan) | Mengirim WhatsApp + Email H-1 dan H+2 jam sebelum jadwal | Pelanggan tidak lupa jadwal bermain |
+| 5 | Daftar / Masuk | Isi email + password (daftar) atau masuk; nomor HP diisi saat daftar | Membuat sesi `padel_session`, mengembalikan pilihan slot ke wizard | Akun tersimpan; riwayat & tiket melekat ke akun |
+| 6 | Bayar | Selesaikan pembayaran di Snap popup / QRIS | Payment gateway memvalidasi pembayaran; webhook memperbarui status booking | Status otomatis menjadi **Terkonfirmasi** |
+| 7 | Tiket Digital | Lihat tiket di `/riwayat` atau bagikan tautan | Menampilkan kode booking + detail lengkap + tautan akses tanpa login | Bukti valid yang bisa dibagikan ke grup; tanpa notifikasi WhatsApp/Email |
 
 ### Skenario Gagal yang Perlu Ditangani
 - **Slot keduluan orang lain saat pelanggan masih checkout** → sistem menampilkan pesan "slot telah terisi", menyimpan pilihan lain yang masih kosong.
-- **OTP tidak terkirim / tidak sampai** → tombol "kirim ulang" dengan hitung mundur 60 detik.
-- **Pembayaran QRIS gagal / kedaluwarsa** → status "Menunggu Pembayaran" dengan batas waktu + opsi membatalkan order.
-- **Booking menunggu bayar tidak dibayar** → sistem mengosongkan kembali slot setelah **15 menit** ([ADR 0006](06-adr/0006-batas-waktu-pembayaran-qris.md)).
+- **Lupa password** → tidak ada reset mandiri di MVP; pemain menghubungi admin untuk reset ([ADR 0009](06-adr/0009-akun-email-password.md), PRD Q7).
+- **Pembayaran gagal / kedaluwarsa** → status "Menunggu Pembayaran" dengan batas waktu + opsi membatalkan order.
+- **Booking menunggu bayar tidak dibayar** → sistem mengosongkan kembali slot setelah **15 menit** ([ADR 0006](06-adr/0006-batas-waktu-pembayaran-qris.md)); status terlihat di `/riwayat`.
 
 ---
 
@@ -55,7 +54,7 @@ Landing Page → Pilih Tanggal → Pilih Lapangan & Jam → Review Order
 1. Dashboard → klik tombol **"+ Booking Manual"**.
 2. Isi form: nama, nomor HP, lapangan, tanggal, jam, durasi.
 3. Pilih metode pembayaran: **Tunai / Sudah Bayar** (booking langsung **Terkonfirmasi**) ATAU **Belum Bayar (Utang/Menunggu)**.
-4. Sistem membuat booking + tiket; admin dapat mencetak/mengirim bukti lewat WhatsApp.
+4. Sistem membuat booking + tiket untuk **user bayangan** (nama + HP, tanpa akun asli); admin dapat mencetak/membagikan tautan tiket secara manual. User bayangan dianonimisasi otomatis setelah 7 hari ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
 
 ### 3.3 Menutup Lapangan (Maintenance / Perbaikan)
 1. Jadwal → pilih lapangan, tanggal, dan rentang jam (atau seluruh hari).
@@ -64,29 +63,33 @@ Landing Page → Pilih Tanggal → Pilih Lapangan & Jam → Review Order
 
 ---
 
-## 4. Sitemap — Sisi Customer (5 Halaman Inti)
+## 4. Sitemap — Sisi Customer (6 Halaman Inti)
 
 ```
 /                        Landing Page
 │                        (hero, daftar lapangan singkat, harga, CTA booking, testimoni, kontak)
 │
 ├── /booking             Wizard Booking (multi-step dalam 1 halaman)
-│                        Tanggal → Lapangan & Jam → Review → Checkout
+│                        Tanggal → Lapangan & Jam → Review → Checkout (wajib sesi)
 │
-├── /login               Login / Registrasi ringan
-│                        (Nomor HP + Nama → OTP → tanpa password)
+├── /login               Masuk akun (email + password)
+│
+├── /daftar              Daftar akun (nama, email, password, nomor HP)
+│                        → akun aktif langsung, tanpa OTP/verifikasi email
 │
 ├── /tiket/:kode         Tiket / Bukti Booking
 │                        (bisa dibuka tanpa login via kode unik)
 │
 └── /riwayat             Riwayat Booking Pemain
-                        (hanya setelah login/OTP)
+                         (wajib login akun)
 ```
 
 **Catatan UX:**
 - `/booking` dibuat **satu halaman multi-step** (bukan berpindah URL) untuk meminimalkan langkah & menghindari pengguna tersesat.
+- Tanpa sesi, `/booking` mengarah ke `/login` dan kembali ke wizard dengan pilihan slot utuh.
 - `/tiket/:kode` bisa diakses tanpa login agar tiket bisa dibagikan ke rekan pemain & admin dapat melihatnya saat check-in.
 - `/riwayat` menampilkan booking aktif (belum berlalu) paling atas, lalu yang sudah selesai/dibatalkan.
+- Tidak ada notifikasi WhatsApp/Email; jadwal terdekat ditampilkan di `/riwayat` & `/tiket` ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).
 
 ---
 

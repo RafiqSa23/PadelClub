@@ -27,6 +27,10 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S14 | Index hot-path + connection pool DB | ✅ | Migrasi `0003` (11 index: cron, riwayat, grid, OTP, log) + `max: 5` di `src/db/index.ts` (2026-11-10) |
 | S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (3 file, ≤45 request), guard DB test + localhost, `npm run test:api` (2026-11-10) |
 | S16 | Polling jadwal hemat (cache + versi + delta 304) | ✅ | `src/lib/slot-status.ts`, `GET /api/slots/status`, `getDaySchedule` 1 roundtrip, strip minggu 1 request (2026-11-10) |
+| S17 | Auth pemain email + password (ganti OTP) | ✅ | [ADR 0009](docs/06-adr/0009-akun-email-password.md): `/api/auth/register|login|logout|me`, `user_sessions` (token opaque + SHA-256), halaman `/login` + `/daftar`, sesi `padel_session` berbasis `userId` (2026-11-12) |
+| S18 | User bayangan walk-in + cron anonimisasi 7 hari | ✅ | [ADR 0011](docs/06-adr/0011-user-bayangan-walkin.md): `users.isGuest`, `anonymizedAt`, `/api/cron/anonymize`, dedupe guest by HP (2026-11-12) |
+| S19 | Pensiunkan notifikasi WhatsApp/Email | ✅ | [ADR 0010](docs/06-adr/0010-mvp-tanpa-notifikasi.md): panggilan notifikasi dihapus (webhook, cron expire), `/api/cron/reminders` + `/api/admin/notifications` dihapus, migrasi `0004` drop `notification_logs` (2026-11-12) |
+| S20 | Halaman `/daftar` + guard sesi `/booking` & `/riwayat` | ✅ | `/daftar` + guard `goCheckout()` dan 401 API (2026-11-12) |
 
 ## Fitur MVP — Sisi Customer
 
@@ -36,12 +40,12 @@ Checklist pemantauan implementasi. Sinkron dengan:
 |---|---|---|---|---|
 | F1 | Pencarian slot (tanggal → lapangan → jam) | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f1--pencarian-slot) |
 | F2 | Keranjang booking multi-jam | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f2--keranjang-booking-multi-jam) |
-| F3 | Checkout cepat (nomor HP + OTP) | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f3--checkout-cepat-nomor-hp--otp) |
-| F4 | Pembayaran via Midtrans Snap popup (semua metode) | ✅¹ | ✅ | [03](docs/03-spesifikasi-fitur.md#f4--pembayaran-qris-otomatis) |
+| F3 | Checkout (akun email + password) | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f3--checkout-akun-email--password) |
+| F4 | Pembayaran via Midtrans Snap popup (semua metode) | ✅¹ | ✅ | [03](docs/03-spesifikasi-fitur.md#f4--pembayaran-otomatis-qris--snap) |
 | F5 | Tiket/bukti booking digital | ✅ | ✅ | [03](docs/03-spesifikasi-fitur.md#f5--tiket--bukti-booking-digital) |
-| F6 | Pengingat otomatis (WhatsApp + Email) | —³ | ✅ | [03](docs/03-spesifikasi-fitur.md#f6--pengingat-otomatis-whatsapp--email) |
+| ~~F6~~ | ~~Pengingat otomatis (WhatsApp + Email)~~ | —³ | —³ | **Dibatalkan 2026-11-12** ([ADR 0010](docs/06-adr/0010-mvp-tanpa-notifikasi.md)) → v2.0 |
 
-> ¹ Snap popup (ADR 0008, 2026-10-01) menggantikan QR Core API: charge mengembalikan `snapToken`, tombol "Bayar Sekarang" + fallback link tab baru; sukses → auto-redirect ke tiket. Driver mock tetap jalur QR dekoratif (`MOCK-QRIS:…`) + simulasi-bayar untuk lokal. ³ F6 berjalan latar belakang (cron + notifikasi) — tidak ada antarmuka pengguna.
+> ¹ Snap popup (ADR 0008, 2026-10-01) menggantikan QR Core API: charge mengembalikan `snapToken`, tombol "Bayar Sekarang" + fallback link tab baru; sukses → auto-redirect ke tiket. Driver mock tetap jalur QR dekoratif (`MOCK-QRIS:…`) + simulasi-bayar untuk lokal. ³ F6 dibatalkan 2026-11-12 ([ADR 0010](docs/06-adr/0010-mvp-tanpa-notifikasi.md)) — tidak ada kanal notifikasi di MVP.
 
 ## Fitur MVP — Sisi Admin
 
@@ -60,10 +64,11 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | Halaman | Deskripsi | Status | Catatan |
 |---|---|---|---|
 | `/` | Landing page | ✅ | UI + token brand |
-| `/booking` | Wizard booking multi-step | ✅ | Snap popup + countdown expiry server + polling 5 dtk + auto-redirect ke tiket (`/api/payments/*`, `/api/webhooks/payment` per-transaksi override); driver mock (QR dekoratif + simulasi-bayar) untuk lokal |
-| `/login` | Login/registrasi nomor HP + OTP | ✅ | Real OTP + sesi `padel_session` (mode dev tampilkan kode) |
-| `/tiket/:kode` | Tiket/bukti digital (tanpa login) | ✅ | Real: `GET /api/tickets/:kode` + notice Batal/Tutup + status check-in; toggle publik dihapus (check-in khusus admin) |
-| `/riwayat` | Riwayat booking pemain | ✅ | Real: `GET /api/me/bookings` (+ `/api/courts` sidebar); butuh sesi OTP, ada CTA login |
+| `/booking` | Wizard booking multi-step | ✅ | Snap popup + countdown expiry server + polling 5 dtk + auto-redirect ke tiket; wajib sesi sebelum checkout (guard `goCheckout()` + API 401) |
+| `/login` | Masuk akun (email + password) | ✅ | UI email + password, tanpa OTP; `safeNextPath()`; lupa password reset via admin ([ADR 0009](docs/06-adr/0009-akun-email-password.md)) |
+| `/daftar` | Daftar akun (nama, email, password, HP) | ✅ | Halaman baru, ak langsung aktif, buat cookie `padel_session` ([ADR 0009](docs/06-adr/0009-akun-email-password.md)) |
+| `/tiket/:kode` | Tiket/bukti digital (wajib login & milik pemilik) | ✅ | Real: `GET /api/tickets/:kode` butuh `padel_session`; pelanggan hanya lihat `booking.userId` miliknya (selain itu 403); admin lewat sesi admin boleh semua; tidak login → 401 diarahkan `/login?next=...` |
+| `/riwayat` | Riwayat booking pemain | ✅ | Real: `GET /api/me/bookings` (+ `/api/courts` sidebar); wajib sesi akun, ada CTA login |
 
 > **Infra halaman (2026-09-28):** `loading.tsx` (customer + panel admin), `error.tsx` (root + panel), `not-found.tsx` global tersedia; metadata SEO per segmen (`(customer)/*`) + judul & `noindex` untuk `/admin/*`. Baca localStorage dipindah ke `useEffect` (hindari hydration mismatch).
 
@@ -86,15 +91,30 @@ Checklist pemantauan implementasi. Sinkron dengan:
 
 ## Sisa Pekerjaan (Belum Dikerjakan)
 
-Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28). Kolom **Backend** pada tabel Fitur F1–F11 tetap ⬜ karena acceptance criteria [`docs/03-spesifikasi-fitur.md`](docs/03-spesifikasi-fitur.md) belum terpenuhi; kolom Frontend ✅ hanya berarti antarmuka sudah ada.
+Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbarui 2026-11-12 setelah revisi scope auth & notifikasi.
+
+### Revisi scope 2026-11-12 (ADR 0009–0011) — sudah diimplementasikan
+- **F3 berubah:** akun email + password tanpa OTP, wajib sesi sebelum checkout ([ADR 0009](docs/06-adr/0009-akun-email-password.md)). Selesai 2026-11-12.
+- **F6 dibatalkan:** tidak ada notifikasi WhatsApp/Email di MVP ([ADR 0010](docs/06-adr/0010-mvp-tanpa-notifikasi.md)).
+- **User bayangan walk-in:** dedupe by HP, anonimisasi otomatis 7 hari, booking historis tetap ([ADR 0011](docs/06-adr/0011-user-bayangan-walkin.md)).
 
 ### Backend / data (fase berikutnya)
-- Endpoint aktif: `/api/health`, `/api/courts`, `/api/slots`, `/api/otp/*`, `/api/bookings/*`, `/api/me/bookings`, `/api/payments/*`, `/api/webhooks/payment`, `/api/cron/*`, `/api/tickets/*`, `/api/admin/*` (Batch 1–7, final).
+- Endpoint aktif: `/api/health`, `/api/courts`, `/api/slots`, `/api/auth/*`, `/api/bookings/*`, `/api/me/bookings`, `/api/payments/*`, `/api/webhooks/payment`, `/api/cron/*`, `/api/tickets/*`, `/api/admin/*`. `/api/otp/*`, `/api/cron/reminders`, `/api/admin/notifications` sudah dihapus (v1.1-auth).
 - ✅ Selesai Batch 1 (2026-09-30): F1 read-path real + F9 penuh + read-model F7 + auth admin backend.
 - ✅ Selesai Batch 2 (2026-09-30): F1–F3 + F8 penuh (OTP mock-driver, transaksi anti-overbooking, walk-in) + wiring `/booking`, `/login`, `/admin/booking/baru`. Docs API v1.0-batch2 (17 endpoint).
 - ✅ Selesai Batch 3 (2026-09-30): F7 + F10 penuh (list/filter/cari, confirm/cancel, overview KPI, tutup-dari-grid, refresh 15 dtk) + wiring `/admin/booking`, `/admin/dashboard`, `/admin/jadwal`. Docs API v1.0-batch3 (19 paths / 21 operasi).
 - ✅ Selesai Batch 4 (2026-09-30): F4 penuh (charge idempoten, polling status, webhook PAID → `terkonfirmasi` + tiket, cron expire 15 mnt + log `kadaluarsa`) + wiring `/booking` (QR payload mock + polling 5 dtk + simulasi-bayar + state kedaluwarsa). Docs API v1.0-batch4 (23 paths / 25 operasi). Uji: charge → webhook → tiket + expiry paksa → cron → slot `kosong`.
 - ✅ Selesai Batch 7 (2026-09-30): F11 penuh (JSON ringkasan + per lapangan, CSV server-side) + wiring `/admin/laporan`. Docs API v1.0-batch7 final (28 paths / 30 operasi). **Seluruh F1–F11 Backend ✅.**
+
+## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
+
+Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji terpisah setelah migrasi `0004_auth_user_sessions`. **44 test lulus (3 file).** `lint`, `typecheck`, `build` hijau.
+
+- **F3 auth:** registrasi email+password 201 + cookie `padel_session`; email duplikat 409; `/api/auth/me` mengembalikan akun; email invalid 400; login password salah 401; booking tanpa sesi 401.
+- **F8 walk-in:** booking tunai admin membuat/memakai user bayangan (`isGuest`) dan langsung `terkonfirmasi`.
+- **F10/F11:** cancel walk-in mengembalikan slot; laporan JSON tetap memuat booking walk-in.
+- **Cron:** `/api/cron/expire` tanpa secret 401; `/api/cron/anonymize?secret=…` 200 (ADR 0011). Endpoint pensiunan (`/api/admin/notifications`) membalas 404.
+- **Temuan & perbaikan:** query anonimisasi memakai nama kolom snake_case (`user_id`, `booking_date`, `created_at`) padahal schema Drizzle memakai identifier quoted camelCase → diperbaiki; parameter `Date` diganti ekspresi SQL `now() - interval '7 days'`. Rate-limit registrasi in-memory menumpuk antar-run → helper test mengirim `x-forwarded-for` unik per klien. DB uji lama (`ep-purple-dew…`) sudah mati; diganti database `padelclub_test` di instance Neon yang sama dengan dev (host berbeda tidak dipakai).
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 
@@ -106,13 +126,13 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 - **B7 laporan:** JSON ringkasan + per lapangan OK; CSV terunduh (`attachment`, header BOM); filter `courtId` OK; 401 tanpa sesi; 400 tanggal invalid. **Temuan & perbaikan:** `addDaysIso` memakai aritmetika tanggal lokal → di WIB selalu kembalikan 366 hari (error palsu); diganti UTC murni + `todayLocal()` (juga di cron reminders).
 
 ### UI / produk yang masih demo
-- Driver mock dipertahankan untuk lokal (QR dekoratif + simulasi-bayar); kunci Midtrans hanya di `.env` (gitignored) — tidak pernah di-commit. (→ sandbox/produksi)
+- Driver mock pembayaran dipertahankan untuk lokal (QR dekoratif + simulasi-bayar); kunci Midtrans hanya di `.env` (gitignored) — tidak pernah di-commit. (→ sandbox/produksi)
 - `src/lib/mock.ts` dipertahankan untuk landing, header publik, seed, dan simulator monitoring (sudah tak dipakai alur operasional).
 
 ### Teknis
 - Gambar eksternal memakai `unoptimized`; `next.config.ts` belum memiliki `remotePatterns`.
 - `EmptyState` dipakai untuk kondisi kosong kartu/tabel; pengecualian disengaja: papan TV (`papan-jadwal`, tema gelap), empty-state kamera scanner (ikon QR), dan not-found tiket (punya dua aksi).
-- Repo: hampir semua kerja frontend belum di-commit (repo masih 1 commit awal).
+- Repo: 6 commit; perubahan `docs/03` (rewrite F4 Snap) + revisi 2026-11-12 masih di working tree.
 - `npm run lint` + `typecheck` + `build` hijau; perbaikan `set-state-in-effect` di `/booking` memakai `useSyncExternalStore` (`src/lib/use-snap.ts`).
 
 ### Performa jadwal (`/api/slots`)
@@ -129,8 +149,9 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 - Guard: tolak `TEST_BASE_URL` non-lokal, tolak DB yang sama dengan `.env`, dan butuh nama DB ber-`test` atau `TEST_DB_CONFIRMED="1"`.
 
 ### Kesiapan produksi (belum selesai)
-- Notifikasi WA/Email masih `mockSendNotification` (PRD Q5 terbuka).
-- Cron F4/F6 butuh scheduler eksternal (belum ada config di repo).
+- Notifikasi WhatsApp/Email & pengingat F6 ditunda ke v2.0 (PRD Q5) — tidak ada integrasi nyata di MVP.
+- Cron F4 (expire) & cron anonimisasi walk-in butuh scheduler eksternal (belum ada config di repo).
+- Verifikasi email & reset password mandiri belum ada (PRD Q7); reset sementara via admin.
 - Kredensial Midtrans: isi hanya di `.env`; key yang pernah tertulis di `.env.example` wajib di-rotate di dashboard Midtrans.
 - Alur bayar Midtrans sandbox belum diuji end-to-end (butuh URL publik + key valid).
 

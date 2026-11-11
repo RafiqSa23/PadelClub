@@ -29,6 +29,13 @@
       "when": 1794302771602,
       "tag": "0003_aromatic_random",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794468000000,
+      "tag": "0004_auth_user_sessions",
+      "breakpoints": true
     }
   ]
 }

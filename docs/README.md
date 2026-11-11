@@ -11,7 +11,7 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | User Journey | ✅ Selesai |
 | Spesifikasi Fitur | ✅ Selesai |
 | PRD | ✅ Selesai |
-| Keputusan Arsitektur (ADR) | ✅ Selesai (8 keputusan) |
+| Keputusan Arsitektur (ADR) | ✅ Selesai (11 keputusan) |
 | Spesifikasi Teknis | ⏳ Sebagian (PRD §4 + ADR 0005 & 0007) |
 | Design System (DESIGN.md) | ✅ Diadopsi (token di `src/app/globals.css`) |
 | Dokumentasi Backend API (07) | ✅ Batch 7 — final (28 paths / 30 operasi) |
@@ -26,13 +26,16 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | [`04-PRD.md`](04-PRD.md) | Product Requirements Document (dokumen master) | 4 |
 | [`05-glossary.md`](05-glossary.md) | Istilah domain yang dipakai konsisten di semua dokumen | Referensi |
 | [`06-adr/0001-qris-pihak-ketiga.md`](06-adr/0001-qris-pihak-ketiga.md) | Keputusan: QRIS via payment gateway pihak ketiga | Referensi |
-| [`06-adr/0002-akun-nomor-hp.md`](06-adr/0002-akun-nomor-hp.md) | Keputusan: akun cukup nomor HP + OTP | Referensi |
-| [`06-adr/0003-notifikasi.md`](06-adr/0003-notifikasi.md) | Keputusan: notifikasi WhatsApp + Email otomatis | Referensi |
+| [`06-adr/0002-akun-nomor-hp.md`](06-adr/0002-akun-nomor-hp.md) | Keputusan: akun cukup nomor HP + OTP — **digantikan ADR 0009** | Referensi |
+| [`06-adr/0003-notifikasi.md`](06-adr/0003-notifikasi.md) | Keputusan: notifikasi WhatsApp + Email otomatis — **digantikan ADR 0010** | Referensi |
 | [`06-adr/0004-lapangan-configurable.md`](06-adr/0004-lapangan-configurable.md) | Keputusan: jumlah & jam lapangan configurable via admin | Referensi |
 | [`06-adr/0005-tech-stack-nextjs-drizzle.md`](06-adr/0005-tech-stack-nextjs-drizzle.md) | Keputusan: stack Next.js + Drizzle ORM + Neon PostgreSQL | Referensi |
 | [`06-adr/0006-batas-waktu-pembayaran-qris.md`](06-adr/0006-batas-waktu-pembayaran-qris.md) | Keputusan: batas pembayaran QRIS & pelepasan slot 15 menit | Referensi |
 | [`06-adr/0007-payment-gateway-midtrans.md`](06-adr/0007-payment-gateway-midtrans.md) | Keputusan: payment gateway Midtrans (QRIS Core API — digantikan ADR 0008) | Referensi |
 | [`06-adr/0008-snap-popup-pengganti-core-api.md`](06-adr/0008-snap-popup-pengganti-core-api.md) | Keputusan: Midtrans Snap popup semua metode (pengganti ADR 0007 + pengecualian non-goal QRIS) | Referensi |
+| [`06-adr/0009-akun-email-password.md`](06-adr/0009-akun-email-password.md) | Keputusan: akun email + password tanpa OTP, wajib login sebelum checkout | Referensi |
+| [`06-adr/0010-mvp-tanpa-notifikasi.md`](06-adr/0010-mvp-tanpa-notifikasi.md) | Keputusan: MVP tanpa notifikasi WhatsApp/Email; F6 dibatalkan | Referensi |
+| [`06-adr/0011-user-bayangan-walkin.md`](06-adr/0011-user-bayangan-walkin.md) | Keputusan: user bayangan walk-in + anonimisasi 7 hari | Referensi |
 | [`DESIGN.md`](DESIGN.md) | Design system (diadopsi, status slot + arah visual) | Referensi |
 | [`07-api-backend.md`](07-api-backend.md) | Dokumentasi backend API + contoh curl (versi per batch) | Referensi |
 | [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) | Spesifikasi OpenAPI 3.1 (impor Postman/Swagger UI) | Referensi |
@@ -50,11 +53,12 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 ## Keputusan Produk yang Sudah Dikunci
 
 1. Pembayaran menggunakan **QRIS otomatis** melalui payment gateway pihak ketiga.
-2. Akun pengguna cukup **nomor HP** (menggunakan OTP, tanpa password).
-3. Notifikasi dikirim **otomatis** ke **WhatsApp dan Email**.
+2. Akun pengguna: **email + password**, wajib login sebelum checkout, **tanpa OTP** ([ADR 0009](06-adr/0009-akun-email-password.md); menggantikan ADR 0002).
+3. **Tidak ada notifikasi WhatsApp/Email di MVP**; tiket diakses di akun/tautan ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md); menggantikan ADR 0003).
 4. Jumlah lapangan 5-10 dengan **jam operasional configurable** oleh admin.
 5. Batas waktu pembayaran QRIS & pelepasan slot `Menunggu Pembayaran` = **15 menit**.
 6. Payment gateway: **Midtrans** (**Snap popup**, semua metode — [ADR 0008](06-adr/0008-snap-popup-pengganti-core-api.md); sebelumnya QRIS Core API, ADR 0007).
+7. Booking walk-in memakai **user bayangan**, dianonimisasi otomatis setelah **7 hari** ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
 
 ## Changelog
 
@@ -80,3 +84,4 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | 2026-10-01 | ADR 0008: pembayaran pindah ke **Midtrans Snap popup** (semua metode, gantikan Core API QRIS) + pengecualian non-goal QRIS di PRD; charge kembalikan `snapToken`, webhook per-transaksi via `X-Override-Notification` |
 | 2026-11-10 | Hardening: migrasi `0003` (11 index hot-path) + connection pool `max: 5`; fix lint `/booking` (`useSyncExternalStore` untuk snap.js); `.env.example` dibersihkan (kredensial Midtrans wajib di `.env` lokal); test HTTP vitest serial (`tests/api/*`, `npm run test:api`) |
 | 2026-11-10 | Jadwal hemat: `getDaySchedule` satu roundtrip, cache + versi per tanggal, `GET /api/slots/status` balas 304 saat tidak ada perubahan, strip minggu satu request, `expiresAt` per slot agar klien membuka slot kedaluwarsa sendiri |
+| 2026-11-12 | **Revisi scope:** ADR 0009 akun **email + password tanpa OTP** (menggantikan ADR 0002), ADR 0010 **MVP tanpa notifikasi WhatsApp/Email** + F6 dibatalkan (menggantikan ADR 0003), ADR 0011 **user bayangan walk-in + anonimisasi 7 hari**. Sinkron PRD v1.1 (KPI-3, US-04/05/06/08, non-goals, Q5/Q7/Q8), 01/02/03/05, PROGRESS |

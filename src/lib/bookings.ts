@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, count, eq, gte, inArray, ne } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   bookingSlots,
@@ -180,6 +180,21 @@ export async function createBookingTx(input: CreateBookingInput) {
     }
     throw err;
   }
+}
+
+/** Jumlah booking aktif (belum batal & belum lewat) milik akun — batas ADR 0009/PRD Q8. */
+export async function countActiveBookings(userId: number, today: string): Promise<number> {
+  const rows = await db
+    .select({ n: count() })
+    .from(bookings)
+    .where(
+      and(
+        eq(bookings.userId, userId),
+        ne(bookings.status, 'dibatalkan'),
+        gte(bookings.bookingDate, today),
+      ),
+    );
+  return Number(rows[0]?.n ?? 0);
 }
 
 /** Nama/HP penampil untuk booking (tamu diutamakan, fallback user). */

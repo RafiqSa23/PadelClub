@@ -3,21 +3,32 @@ import { db } from '@/db';
 import { bookingSlots, bookings, closures, courts, payments } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { resolveCustomer } from '@/lib/bookings';
+import { getCurrentUser } from '@/lib/user-auth';
+import { getCurrentAdmin } from '@/lib/admin-auth';
 
 /**
- * Tiket publik via kode (F5): dibuka tanpa login (kode unik per booking).
- * Memuat seluruh field tiket (AC F5) + status check-in + pemberitahuan
- * jelas bila booking Batal atau jadwalnya ketiban penutupan (Tutup).
+ * Tiket via kode (F5): wajib login.
+ * - Pelanggan hanya boleh melihat tiket miliknya sendiri (userId cocok sesi).
+ * - Admin (scanner gate) boleh melihat semua tiket via sesi admin.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ kode: string }> },
 ) {
   const { kode } = await params;
 
+  const user = await getCurrentUser();
+  const admin = await getCurrentAdmin();
+  if (!user && !admin) return jsonError('Masuk ke akun terlebih dahulu', 401);
+
   const rows = await db.select().from(bookings).where(eq(bookings.code, kode)).limit(1);
   const booking = rows[0];
   if (!booking) return jsonError('Tiket tidak ditemukan', 404);
+
+  // Pelanggan hanya boleh lihat tiket miliknya sendiri.
+  if (user && !admin && (!booking.userId || Number(booking.userId) !== user.id)) {
+    return jsonError('Anda bukan pemilik tiket ini', 403);
+  }
 
   const [slotRows, courtRows, paymentRows, closureRows] = await Promise.all([
     db.select().from(bookingSlots).where(eq(bookingSlots.bookingId, booking.id)),

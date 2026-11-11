@@ -1,11 +1,13 @@
 openapi: 3.1.0
 info:
   title: Padel Court Booking — Backend API
-  version: 1.0-batch7
+  version: 1.1-auth
   description: >-
     API backend Sistem Penyewaan Lapangan Padel (Next.js Route Handlers +
     Drizzle ORM + Neon PostgreSQL). Dokumen manusia: docs/07-api-backend.md.
-    Versi mengikuti batch backend: 1.0-batch7 (+ laporan & CSV, seluruh batch selesai).
+    Versi 1.1-auth = revisi scope 2026-11-12 (ADR 0009–0011): auth email+password
+    menggantikan OTP, notifikasi WhatsApp/Email dipensiunkan, user bayangan walk-in
+    dianonimisasi 7 hari. Operasi bertanda deprecated akan dihapus saat implementasi.
 summary: API backend MVP Padel Court Booking
 servers:
   - url: /api
@@ -14,7 +16,7 @@ tags:
   - name: Public
     description: Tanpa autentikasi (kesehatan, katalog, ketersediaan slot).
   - name: Pelanggan–Auth
-    description: OTP nomor HP + sesi padel_session.
+    description: Akun email + password + sesi padel_session (ADR 0009). OTP dipensiunkan.
   - name: Pelanggan–Booking
     description: Buat & baca booking (perlu sesi padel_session, kecuali detail via kode).
   - name: Admin–Auth
@@ -134,8 +136,9 @@ paths:
           $ref: '#/components/responses/BadRequest'
   /otp/request:
     post:
+      deprecated: true
       tags: [Pelanggan–Auth]
-      summary: Minta kode OTP 6 digit (F3, driver mock)
+      summary: '[DIPENSIUNKAN] Minta kode OTP 6 digit — diganti /auth/register'
       operationId: otpRequest
       requestBody:
         required: true
@@ -183,6 +186,7 @@ paths:
           $ref: '#/components/responses/RateLimited'
   /otp/verify:
     post:
+      deprecated: true
       tags: [Pelanggan–Auth]
       summary: Verifikasi OTP → auto-create akun + cookie sesi (F3)
       operationId: otpVerify
@@ -1394,8 +1398,9 @@ paths:
                 message: Hanya booking terkonfirmasi yang bisa check-in
   /admin/notifications:
     get:
+      deprecated: true
       tags: [Admin–Monitoring]
-      summary: Baca log notifikasi — audit tiket/pengingat/kedaluwarsa (F6)
+      summary: '[DIPENSIUNKAN] Baca log notifikasi — notifikasi dicabut dari MVP (ADR 0010)'
       operationId: listNotifications
       security:
         - cookieAuth: []
@@ -1468,8 +1473,9 @@ paths:
           $ref: '#/components/responses/Unauthorized'
   /cron/reminders:
     get:
+      deprecated: true
       tags: [Cron]
-      summary: Kirim pengingat H-1 & H-2jam — idempoten, retry 3x (F6)
+      summary: '[DIPENSIUNKAN] Kirim pengingat H-1 & H-2jam — F6 dibatalkan (ADR 0010)'
       operationId: sendReminders
       parameters:
         - name: secret
@@ -1618,7 +1624,7 @@ components:
       type: apiKey
       in: cookie
       name: padel_session
-      description: Sesi pelanggan HMAC (HttpOnly). Diperoleh dari POST /otp/verify.
+      description: Sesi pelanggan HMAC (HttpOnly). Diperoleh dari POST /auth/login atau /auth/register.
   responses:
     BadRequest:
       description: Validasi gagal

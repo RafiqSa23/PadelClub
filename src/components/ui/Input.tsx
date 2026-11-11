@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import type {
   InputHTMLAttributes,
   ReactNode,
@@ -70,68 +69,6 @@ export function PhoneInput({ className, ...props }: InputHTMLAttributes<HTMLInpu
     <div className="relative">
       <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-whisper">+62</span>
       <input inputMode="tel" type="tel" className={cn(baseFieldClass, "h-11 pl-12", className)} {...props} />
-    </div>
-  );
-}
-
-const OTP_LENGTH = 6;
-
-export function OTPInput({
-  value,
-  onChange,
-  error,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  error?: boolean;
-}) {
-  const refs = useRef<Array<HTMLInputElement | null>>([]);
-
-  function handleChange(index: number, char: string) {
-    if (!/^\d?$/.test(char)) return;
-    const arr = value.split("");
-    arr[index] = char;
-    const next = arr.join("").slice(0, OTP_LENGTH);
-    onChange(next);
-    if (char && index < OTP_LENGTH - 1) refs.current[index + 1]?.focus();
-  }
-
-  function handleKeyDown(index: number, event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key !== "Backspace") return;
-    const arr = value.split("");
-    if (value[index]) {
-      arr[index] = "";
-      onChange(arr.join(""));
-    } else if (index > 0) {
-      arr[index - 1] = "";
-      onChange(arr.join(""));
-      refs.current[index - 1]?.focus();
-    }
-  }
-
-  return (
-    <div className="flex justify-between gap-2" role="group" aria-label="Kode OTP 6 digit">
-      {Array.from({ length: OTP_LENGTH }).map((_, i) => (
-        <input
-          key={i}
-          ref={(element) => {
-            refs.current[i] = element;
-          }}
-          inputMode="numeric"
-          autoComplete={i === 0 ? "one-time-code" : "off"}
-          aria-label={`Digit ${i + 1}`}
-          aria-invalid={error}
-          maxLength={1}
-          value={value[i] ?? ""}
-          onChange={(event) => handleChange(i, event.target.value)}
-          onKeyDown={(event) => handleKeyDown(i, event)}
-          onFocus={(event) => event.target.select()}
-          className={cn(
-            "h-12 w-11 rounded-xl border text-center text-lg font-extrabold tabular-nums text-night transition-colors focus:outline-2 focus:outline-offset-2 focus:outline-court sm:w-12",
-            error ? "border-danger bg-danger-light" : "border-line bg-white focus:border-court",
-          )}
-        />
-      ))}
     </div>
   );
 }

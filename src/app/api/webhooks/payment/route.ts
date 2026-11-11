@@ -2,10 +2,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { bookings, payments } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
-import { resolveCustomer } from '@/lib/bookings';
 import { getPaymentDriver } from '@/lib/payment-driver';
 import { confirmBookingPaid, expireBookingPayment } from '@/lib/settle-payment';
-import { mockSendNotification } from '@/lib/notify-driver';
 
 const PAID_STATUSES = new Set(['paid', 'settlement', 'capture']);
 const EXPIRED_STATUSES = new Set(['expire', 'expiry', 'cancel', 'cancelled', 'deny', 'failed']);
@@ -99,19 +97,6 @@ export async function POST(request: Request) {
       return jsonError('Booking sudah tidak menunggu pembayaran', 409);
     }
     await confirmBookingPaid(payment.id, booking.id, booking.bookingDate);
-    // Tiket dikirim otomatis (mock log; provider WA/Email final di Batch 6).
-    try {
-      const customer = await resolveCustomer(booking);
-      await mockSendNotification({
-        bookingId: booking.id,
-        channel: 'whatsapp',
-        type: 'tiket',
-        to: customer.phone ?? '-',
-        message: `Tiket ${booking.code} terkonfirmasi.`,
-      });
-    } catch {
-      // Notifikasi best-effort — pembayaran tetap sah.
-    }
     return jsonOk({ booking: { code: booking.code, status: 'terkonfirmasi' } });
   }
 

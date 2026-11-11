@@ -8,7 +8,7 @@ import { Stepper } from "@/components/ui/Stepper";
 import { SlotCell } from "@/components/ui/SlotCell";
 import { QRBox } from "@/components/ui/QRBox";
 import { Countdown } from "@/components/ui/Countdown";
-import { OTPInput, PhoneInput, TextInput } from "@/components/ui/Input";
+import { PhoneInput, TextInput } from "@/components/ui/Input";
 import { StatusLegend } from "@/components/layout/StatusLegend";
 import { MIcon } from "@/components/ui/MIcon";
 import {
@@ -60,14 +60,13 @@ export default function BookingPage() {
   const [slotError, setSlotError] = useState<string | undefined>();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [otp, setOtp] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authMode, setAuthMode] = useState<"masuk" | "daftar">("masuk");
   const [authError, setAuthError] = useState<string | undefined>();
   const [simulating, setSimulating] = useState(false);
   const [ticketCode, setTicketCode] = useState<string | undefined>();
-  const [otpKey, setOtpKey] = useState(0);
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [devCode, setDevCode] = useState<string | undefined>();
+  const [authLoading, setAuthLoading] = useState(false);
   const [holdExpiry, setHoldExpiry] = useState<string | undefined>();
   const [holdSeconds, setHoldSeconds] = useState(15 * 60);
   // State pembayaran (Batch 4 mock → P1 Midtrans sandbox → ADR 0008 Snap popup).
@@ -160,57 +159,14 @@ export default function BookingPage() {
     );
   }
 
-  async function sendOtp() {
-    if (!name.trim() || !isValidPhone(phone)) {
-      setAuthError("Isi nama dan nomor HP yang valid (contoh: 0812…).");
-      return;
-    }
-    setAuthError(undefined);
-    setOtpLoading(true);
-    try {
-      const res = await fetch("/api/otp/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, name: name.trim() }),
-      });
-      const json = (await res.json()) as { ok: boolean; message?: string; debugCode?: string };
-      if (!json.ok) {
-        setAuthError(json.message ?? "Gagal mengirim OTP.");
-        return;
-      }
-      setDevCode(json.debugCode);
-      setOtp("");
-      setOtpSent(true);
-      setOtpKey((value) => value + 1);
-    } catch {
-      setAuthError("Tidak dapat terhubung ke server.");
-    } finally {
-      setOtpLoading(false);
-    }
-  }
-
-  async function verifyOtp() {
-    if (otp.length !== 6) {
-      setAuthError("Masukkan 6 digit kode OTP.");
-      return;
-    }
+  async function createBooking() {
     if (!court) {
       setAuthError("Pilih slot terlebih dahulu.");
       return;
     }
     setAuthError(undefined);
-    setOtpLoading(true);
+    setAuthLoading(true);
     try {
-      const vres = await fetch("/api/otp/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, code: otp, name: name.trim() }),
-      });
-      const vjson = (await vres.json()) as { ok: boolean; message?: string };
-      if (!vjson.ok) {
-        setAuthError(vjson.message ?? "Verifikasi gagal.");
-        return;
-      }
       // Tahan slot di server (menunggu_pembayaran, +15 menit).
       const bres = await fetch("/api/bookings", {
         method: "POST",
@@ -252,7 +208,68 @@ export default function BookingPage() {
     } catch {
       setAuthError("Tidak dapat terhubung ke server.");
     } finally {
-      setOtpLoading(false);
+      setAuthLoading(false);
+    }
+  }
+
+  /** Cek sesi lebih dulu — akun yang sudah login langsung membuat booking. */
+  async function goCheckout() {
+    setAuthError(undefined);
+    setAuthLoading(true);
+    try {
+      const res = await fetch("/api/auth/me");
+      if (res.ok) {
+        await createBooking();
+        return;
+      }
+      setStep("identitas");
+    } catch {
+      setStep("identitas");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function submitAccount() {
+    if (authMode === "daftar" && !name.trim()) {
+      setAuthError("Nama wajib diisi.");
+      return;
+    }
+    if (!email.trim() || !password) {
+      setAuthError("Email dan password wajib diisi.");
+      return;
+    }
+    if (authMode === "daftar" && password.length < 8) {
+      setAuthError("Password minimal 8 karakter.");
+      return;
+    }
+    if (authMode === "daftar" && !isValidPhone(phone)) {
+      setAuthError("Nomor HP tidak valid (contoh: 0812…).");
+      return;
+    }
+    setAuthError(undefined);
+    setAuthLoading(true);
+    try {
+      const endpoint = authMode === "daftar" ? "/api/auth/register" : "/api/auth/login";
+      const payload =
+        authMode === "daftar"
+          ? { name: name.trim(), email: email.trim(), password, phone }
+          : { email: email.trim(), password };
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = (await res.json()) as { ok: boolean; message?: string };
+      if (!json.ok) {
+        setAuthError(json.message ?? "Gagal masuk. Periksa data Anda.");
+        return;
+      }
+      await createBooking();
+    } catch {
+      setAuthError("Tidak dapat terhubung ke server.");
+    } finally {
+      setAuthLoading(false);
     }
   }
 
@@ -773,7 +790,7 @@ export default function BookingPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/80 px-5 py-4 sm:px-6">
                   <div>
                     <p className="text-headline-sm text-on-surface">
-                      {step === "identitas" ? "Checkout cepat" : "Pembayaran"}
+                      {step === "identitas" ? "Akun pemesan" : "Pembayaran"}
                     </p>
                     <p className="mt-0.5 text-body-sm text-slate-whisper">
                       {court?.name} · {dateLabel(date)} · {timeRange} · {sortedSelected.length} jam
@@ -786,71 +803,110 @@ export default function BookingPage() {
                 <CardBody className="space-y-4">
                   {step === "identitas" ? (
                     <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-2 rounded-xl bg-mist-shadow p-1">
+                        <button
+                          type="button"
+                          onClick={() => setAuthMode("masuk")}
+                          className={cn(
+                            "cursor-pointer rounded-lg py-2 text-label-md transition-colors",
+                            authMode === "masuk"
+                              ? "bg-field-white text-on-surface shadow-sm"
+                              : "text-slate-whisper",
+                          )}
+                        >
+                          Masuk
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAuthMode("daftar")}
+                          className={cn(
+                            "cursor-pointer rounded-lg py-2 text-label-md transition-colors",
+                            authMode === "daftar"
+                              ? "bg-field-white text-on-surface shadow-sm"
+                              : "text-slate-whisper",
+                          )}
+                        >
+                          Daftar
+                        </button>
+                      </div>
+
+                      {authMode === "daftar" && (
+                        <>
+                          <div>
+                            <label
+                              className="mb-1.5 block text-label-md text-on-surface"
+                              htmlFor="b-name"
+                            >
+                              Nama Pemesan
+                            </label>
+                            <TextInput
+                              id="b-name"
+                              value={name}
+                              onChange={(event) => setName(event.target.value)}
+                              placeholder="cth: Raka Pratama"
+                              autoComplete="name"
+                            />
+                          </div>
+                          <div>
+                            <label
+                              className="mb-1.5 block text-label-md text-on-surface"
+                              htmlFor="b-phone"
+                            >
+                              Nomor HP
+                            </label>
+                            <PhoneInput
+                              id="b-phone"
+                              value={phone}
+                              onChange={(event) => setPhone(event.target.value)}
+                              placeholder="812 3456 7890"
+                            />
+                            <p className="mt-1.5 text-body-sm text-slate-whisper">
+                              Awalan +62 sudah terisi — cukup tulis 08… atau 812….
+                            </p>
+                          </div>
+                        </>
+                      )}
+
                       <div>
                         <label
                           className="mb-1.5 block text-label-md text-on-surface"
-                          htmlFor="b-name"
+                          htmlFor="b-email"
                         >
-                          Nama Pemesan
+                          Email
                         </label>
                         <TextInput
-                          id="b-name"
-                          value={name}
-                          onChange={(event) => setName(event.target.value)}
-                          placeholder="cth: Raka Pratama"
+                          id="b-email"
+                          type="email"
+                          value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          placeholder="nama@email.com"
+                          autoComplete="email"
                         />
                       </div>
                       <div>
                         <label
                           className="mb-1.5 block text-label-md text-on-surface"
-                          htmlFor="b-phone"
+                          htmlFor="b-password"
                         >
-                          Nomor WhatsApp (Untuk E-Ticket &amp; OTP)
+                          Password
                         </label>
-                        <PhoneInput
-                          id="b-phone"
-                          value={phone}
-                          onChange={(event) => setPhone(event.target.value)}
-                          placeholder="812 3456 7890"
+                        <TextInput
+                          id="b-password"
+                          type="password"
+                          value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          placeholder="Minimal 8 karakter"
+                          autoComplete={authMode === "daftar" ? "new-password" : "current-password"}
                         />
-                        <p className="mt-1.5 text-body-sm text-slate-whisper">
-                          Awalan +62 sudah terisi — cukup tulis 08… atau 812….
-                        </p>
                       </div>
-                      {otpSent ? (
-                        <div className="space-y-3 rounded-xl bg-mist-shadow p-4">
-                          <div className="flex items-center justify-between">
-                            <p className="text-label-md text-on-surface">Kode Verifikasi (OTP)</p>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void sendOtp();
-                              }}
-                              className="cursor-pointer text-label-sm text-primary-container hover:underline"
-                            >
-                              Kirim ulang
-                            </button>
-                          </div>
-                          <OTPInput key={otpKey} value={otp} onChange={setOtp} error={!!authError} />
-                          <Button onClick={() => void verifyOtp()} fullWidth size="lg" loading={otpLoading}>
-                            Verifikasi &amp; lanjut bayar
-                          </Button>
-                          <p className="text-body-sm text-slate-whisper">
-                            {devCode ? (
-                              <>
-                                Kode (mode dev):{" "}
-                                <span className="tabular-nums text-on-surface">{devCode}</span>
-                              </>
-                            ) : (
-                              "Kode dikirim via WhatsApp. Berlaku 5 menit."
-                            )}
-                          </p>
-                        </div>
-                      ) : (
-                        <Button onClick={() => void sendOtp()} fullWidth size="lg" loading={otpLoading}>
-                          Kirim kode OTP
-                        </Button>
-                      )}
+
+                      <Button onClick={() => void submitAccount()} fullWidth size="lg" loading={authLoading}>
+                        {authMode === "daftar" ? "Daftar & lanjut bayar" : "Masuk & lanjut bayar"}
+                      </Button>
+                      <p className="text-body-sm text-slate-whisper">
+                        Booking & riwayat tersimpan di akun. Tidak ada OTP; lupa password direset
+                        oleh admin.
+                      </p>
                       {authError && (
                         <p className="flex items-center gap-2 text-body-md font-semibold text-danger" role="alert">
                           <IconAlert size={16} /> {authError}
@@ -910,7 +966,7 @@ export default function BookingPage() {
                           fullWidth
                           onClick={() => {
                             setPayFailed(undefined);
-                            setStep("identitas");
+                            setStep("review");
                           }}
                         >
                           Kembali
@@ -1074,7 +1130,7 @@ export default function BookingPage() {
                         >
                           Cek status pembayaran
                         </Button>
-                        <Button variant="secondary" fullWidth onClick={() => setStep("identitas")}>
+                        <Button variant="secondary" fullWidth onClick={() => setStep("review")}>
                           Kembali
                         </Button>
                       </div>
@@ -1171,20 +1227,11 @@ export default function BookingPage() {
                     <Button
                       fullWidth
                       size="lg"
-                      onClick={() => setStep("identitas")}
+                      loading={authLoading}
+                      onClick={() => void goCheckout()}
                       icon={<IconArrowRight size={18} />}
                     >
-                      Lanjut ke kontak &amp; OTP
-                    </Button>
-                  )}
-                  {step === "identitas" && !otpSent && (
-                    <Button fullWidth size="lg" onClick={sendOtp}>
-                      Kirim kode OTP
-                    </Button>
-                  )}
-                  {step === "identitas" && otpSent && (
-                    <Button fullWidth size="lg" onClick={verifyOtp}>
-                      Verifikasi &amp; lanjut bayar
+                      Lanjut ke pembayaran
                     </Button>
                   )}
                   {step === "pembayaran" && !isExpired && payGateway === "midtrans" && (

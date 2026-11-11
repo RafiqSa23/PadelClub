@@ -2,8 +2,6 @@ import { and, eq, lt } from 'drizzle-orm';
 import { db } from '@/db';
 import { bookings, payments } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
-import { resolveCustomer } from '@/lib/bookings';
-import { mockSendNotification } from '@/lib/notify-driver';
 import { bumpSlotsVersion } from '@/lib/slot-status';
 
 function isAuthorized(request: Request): boolean {
@@ -48,18 +46,6 @@ export async function GET(request: Request) {
       });
       codes.push(row.code);
       touchedDates.add(row.bookingDate);
-      try {
-        const customer = await resolveCustomer(row);
-        await mockSendNotification({
-          bookingId: row.id,
-          channel: 'whatsapp',
-          type: 'kadaluarsa',
-          to: customer.phone ?? '-',
-          message: `Booking ${row.code} kedaluwarsa. Silakan buat booking baru.`,
-        });
-      } catch {
-        // Notifikasi best-effort.
-      }
     } catch {
       // Lanjut ke booking berikutnya — cron berikutnya mencoba lagi.
     }

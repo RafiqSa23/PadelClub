@@ -5,12 +5,14 @@ import postgres from "postgres";
  *
  * Prinsip:
  * - Hit API sungguhan (server dev) lewat `fetch`, bukan import handler.
- * - Cookie jar per klien (sesi OTP/admin) supaya tidak minta OTP berulang.
- * - Cleanup menghapus HANYA baris milik `TEST_PHONE` + closure berlabel `TEST-`.
+ * - Cookie jar per klien (sesi akun/admin) supaya tidak login berulang.
+ * - Cleanup menghapus HANYA baris milik `TEST_EMAIL`/`TEST_PHONE` + closure berlabel `TEST-`.
  */
 
 export const BASE_URL = (process.env.TEST_BASE_URL ?? "http://localhost:3100").replace(/\/$/, "");
 export const TEST_PHONE = process.env.TEST_PHONE ?? "6280000000001";
+export const TEST_EMAIL = process.env.TEST_EMAIL ?? "pemain-test@padelclub.test";
+export const TEST_PASSWORD = process.env.TEST_PASSWORD ?? "rahasia-test-123";
 export const TEST_PHONE_WALKIN = "6280000000002";
 
 /** Tanggal jauh ke depan supaya tidak bentrok dengan booking asli. */
@@ -30,6 +32,8 @@ export interface ApiClient {
   post<T = Record<string, unknown>>(path: string, body?: unknown): Promise<ApiResponse<T>>;
   patch<T = Record<string, unknown>>(path: string, body?: unknown): Promise<ApiResponse<T>>;
   del<T = Record<string, unknown>>(path: string): Promise<ApiResponse<T>>;
+  /** Hanya status — untuk route yang balasannya bukan JSON (mis. halaman 404 Next). */
+  status(path: string): Promise<number>;
   hasCookie(name: string): boolean;
 }
 
@@ -64,14 +68,14 @@ export async function requireServer(): Promise<void> {
 
 export function apiClient(): ApiClient {
   const cookies = new Map<string, string>();
+  // IP unik per klien uji supaya rate-limit in-memory server tidak menumpuk
+  // antar-run (limit registrasi 5/jam, login 10/menit).
+  const forwardedFor = `198.51.100.${Math.floor(Math.random() * 250) + 1}`;
 
-  async function request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<ApiResponse<T>> {
+  async function send(method: string, path: string, body?: unknown): Promise<Response> {
     requestCount += 1;
     const headers = new Headers();
+    headers.set("x-forwarded-for", forwardedFor);
     if (body !== undefined) headers.set("content-type", "application/json");
     if (cookies.size > 0) {
       headers.set(
@@ -97,6 +101,11 @@ export function apiClient(): ApiClient {
       else cookies.set(name, value);
     }
 
+    return res;
+  }
+
+  async function request<T>(method: string, path: string, body?: unknown): Promise<ApiResponse<T>> {
+    const res = await send(method, path, body);
     const text = await res.text();
     const parsed = text ? (JSON.parse(text) as T) : ({} as T);
     return { status: res.status, body: parsed };
@@ -107,6 +116,7 @@ export function apiClient(): ApiClient {
     post: (path, body) => request("POST", path, body),
     patch: (path, body) => request("PATCH", path, body),
     del: (path) => request("DELETE", path),
+    status: async (path) => (await send("GET", path)).status,
     hasCookie: (name) => cookies.has(name),
   };
 }
@@ -131,18 +141,17 @@ export async function cleanupTestData(): Promise<void> {
     const rows = await db`
       SELECT id FROM bookings
       WHERE "guestPhone" = ${phone}
-         OR "userId" IN (SELECT id FROM users WHERE phone = ${phone})
+         OR "userId" IN (SELECT id FROM users WHERE phone = ${phone} OR email = ${TEST_EMAIL})
     `;
     const ids = rows.map((row) => Number(row.id));
     if (ids.length > 0) {
-      await db`DELETE FROM notification_logs WHERE "bookingId" IN ${db(ids)}`;
       await db`DELETE FROM payments WHERE "bookingId" IN ${db(ids)}`;
       await db`DELETE FROM booking_slots WHERE "bookingId" IN ${db(ids)}`;
       await db`DELETE FROM bookings WHERE id IN ${db(ids)}`;
     }
-    await db`DELETE FROM otp_codes WHERE phone = ${phone}`;
     await db`DELETE FROM users WHERE phone = ${phone}`;
   }
+  await db`DELETE FROM users WHERE email = ${TEST_EMAIL}`;
   await db`DELETE FROM closures WHERE reason LIKE ${"TEST-%"}`;
 }
 

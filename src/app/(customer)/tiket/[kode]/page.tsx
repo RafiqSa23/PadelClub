@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -70,6 +70,7 @@ const FACILITIES = [
 export default function TicketPage() {
   const params = useParams<{ kode: string }>();
   const code = params.kode;
+  const router = useRouter();
   const [ticket, setTicket] = useState<Ticket | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>();
   const [copied, setCopied] = useState(false);
@@ -87,6 +88,14 @@ export default function TicketPage() {
         };
         if (cancelled) return;
         if (!json.ok || !json.ticket) {
+          if (res.status === 401) {
+            router.push(`/login?next=/tiket/${encodeURIComponent(code)}`);
+            return;
+          }
+          if (res.status === 403) {
+            setLoadError("Anda bukan pemilik tiket ini.");
+            return;
+          }
           if (res.status === 404) {
             setTicket(null);
           } else {
@@ -103,7 +112,7 @@ export default function TicketPage() {
     return () => {
       cancelled = true;
     };
-  }, [code]);
+  }, [code, router]);
 
   if (ticket === undefined) {
     if (loadError) {
@@ -519,8 +528,9 @@ export default function TicketPage() {
             </div>
 
             <p className="mt-3 flex items-start gap-2 rounded-xl bg-mist-shadow px-3 py-2.5 text-body-sm text-slate-whisper">
-              <IconInfo size={14} className="mt-0.5 shrink-0" /> Tiket bisa dibuka tanpa login. Untuk
-              akses riwayat, <Link href="/login" className="font-semibold text-court-green-deep hover:underline">masuk</Link>.
+              <IconInfo size={14} className="mt-0.5 shrink-0" /> Tiket hanya bisa dibuka setelah
+              masuk ke akun Anda dan hanya untuk booking milik Anda. Untuk akses riwayat,
+              <Link href="/login" className="font-semibold text-court-green-deep hover:underline">masuk</Link>.
             </p>
           </div>
         </div>

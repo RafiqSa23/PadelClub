@@ -1,23 +1,23 @@
-import { cookies } from 'next/headers';
+import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { courts } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { jsonError, jsonOk } from '@/lib/api';
-import { ConflictError, createBookingTx } from '@/lib/bookings';
-import { verifyCustomerSession, CUSTOMER_SESSION_COOKIE } from '@/lib/session';
-import { isValidDateString } from '@/lib/slots';
+import { ConflictError, countActiveBookings, createBookingTx } from '@/lib/bookings';
 import { rateLimit } from '@/lib/rate-limit';
+import { isValidDateString } from '@/lib/slots';
+import { getCurrentUser } from '@/lib/user-auth';
+
+export const MAX_ACTIVE_BOOKINGS = 3; // ADR 0009 / PRD Q8
 
 /**
- * Buat booking online (F2): pelanggan terautentikasi (sesi OTP) menahan slot.
- * Hasil awal selalu `menunggu_pembayaran` (+15 mnt); pelunasan di Batch 4.
+ * Buat booking online (F2): akun pemain (sesi `padel_session`) menahan slot.
+ * Hasil awal selalu `menunggu_pembayaran` (+15 mnt); batas booking aktif per akun.
  */
 export async function POST(request: Request) {
-  const store = await cookies();
-  const session = verifyCustomerSession(store.get(CUSTOMER_SESSION_COOKIE)?.value ?? '');
-  if (!session) return jsonError('Login dengan OTP terlebih dahulu', 401);
+  const user = await getCurrentUser();
+  if (!user) return jsonError('Masuk ke akun terlebih dahulu', 401);
 
-  const rl = rateLimit(`bookings:${session.uid}`, 10, 60_000);
+  const rl = rateLimit(`bookings:${user.id}`, 10, 60_000);
   if (!rl.allowed) return jsonError('Terlalu banyak percobaan, coba lagi sebentar', 429);
 
   const body = (await request.json().catch(() => null)) as {
@@ -36,12 +36,20 @@ export async function POST(request: Request) {
     return jsonError('Tanggal sudah lewat', 400);
   }
 
+  const active = await countActiveBookings(user.id, today);
+  if (active >= MAX_ACTIVE_BOOKINGS) {
+    return jsonError(
+      `Maksimal ${MAX_ACTIVE_BOOKINGS} booking aktif per akun. Selesaikan atau tunggu jadwal sebelumnya.`,
+      409,
+    );
+  }
+
   try {
     const { booking, hours, payment } = await createBookingTx({
       courtId: body.courtId,
       date: body.date,
       hours: body.hours,
-      userId: session.uid,
+      userId: user.id,
       source: 'online',
       paid: false,
       gateway: 'mock',

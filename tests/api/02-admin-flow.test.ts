@@ -138,11 +138,8 @@ describe("alur admin (F7–F11)", () => {
     expect(deleted.body.deleted.id).toBe(closureId);
   });
 
-  it("log notifikasi tersedia untuk audit (F6)", async () => {
-    const res = await admin.get<{ logs: unknown[]; total: number }>("/api/admin/notifications");
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.logs)).toBe(true);
-    expect(typeof res.body.total).toBe("number");
+  it("endpoint log notifikasi sudah dipensiunkan (404)", async () => {
+    expect(await admin.status("/api/admin/notifications")).toBe(404);
   });
 
   it("laporan JSON memuat ringkasan + per lapangan (F11)", async () => {

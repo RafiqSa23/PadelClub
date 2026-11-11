@@ -1,22 +1,10 @@
-import { createHash, randomBytes, scrypt as _scrypt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { cookies } from 'next/headers';
 import { db } from '@/db';
 import { adminSessions, admins } from '@/db/schema';
 import { ADMIN_SESSION_COOKIE } from './constants';
-
-const scrypt = (
-  password: string,
-  salt: string,
-  keylen: number,
-  opts?: { N?: number; r?: number; p?: number; maxmem?: number },
-): Promise<Buffer> =>
-  new Promise((resolve, reject) => {
-    const cb = (err: Error | null, derived: Buffer) =>
-      err ? reject(err) : resolve(derived);
-    if (opts) _scrypt(password, salt, keylen, opts, cb);
-    else _scrypt(password, salt, keylen, cb);
-  });
+import { hashPassword, verifyPassword } from './password';
 
 export const ADMIN_SESSION_TTL_MS = 12 * 3600 * 1000; // 12 jam
 
@@ -26,25 +14,11 @@ function sha256Hex(input: string): string {
 
 /** Hash password admin dengan scrypt (format: scrypt$N$r$p$salt$derived). */
 export async function hashAdminPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString('hex');
-  const derived = (await scrypt(password, salt, 64)) as Buffer;
-  return `scrypt$16384$8$1$${salt}$${derived.toString('hex')}`;
+  return hashPassword(password);
 }
 
 export async function verifyAdminPassword(password: string, stored: string): Promise<boolean> {
-  const parts = stored.split('$');
-  if (parts[0] !== 'scrypt' || parts.length !== 6) return false;
-  const [, n, r, p, salt, expectedHex] = parts;
-  const derived = (await scrypt(password, salt, 64, {
-    N: Number(n),
-    r: Number(r),
-    p: Number(p),
-    maxmem: 32 * 1024 * 1024,
-  })) as Buffer;
-  const a = Buffer.from(derived.toString('hex'));
-  const b = Buffer.from(expectedHex);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  return verifyPassword(password, stored);
 }
 
 export async function createAdminSession(adminId: number): Promise<{

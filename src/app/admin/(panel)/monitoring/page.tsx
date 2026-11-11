@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { Toggle } from "@/components/ui/Toggle";
 import { MIcon } from "@/components/ui/MIcon";
@@ -25,25 +25,6 @@ const QUICK_LINKS = [
   { icon: "near_me", label: "Petunjuk Arah & Parkir", path: "/#lokasi" },
 ];
 
-interface NotifyLog {
-  id: number;
-  bookingId: number | null;
-  code: string | null;
-  channel: "whatsapp" | "email";
-  type: "tiket" | "pengingat_h1" | "pengingat_h2" | "sisa_pembayaran" | "kadaluarsa";
-  status: "terkirim" | "gagal";
-  sentAt: string;
-  error: string | null;
-}
-
-const NOTIFY_TYPE_LABEL: Record<NotifyLog["type"], string> = {
-  tiket: "Tiket",
-  pengingat_h1: "H-1",
-  pengingat_h2: "H-2 jam",
-  sisa_pembayaran: "Sisa bayar",
-  kadaluarsa: "Kedaluwarsa",
-};
-
 export default function AdminMonitoringPage() {
   const [bannerActive, setBannerActive] = useState(true);
   const [bannerText, setBannerText] = useState(
@@ -53,31 +34,10 @@ export default function AdminMonitoringPage() {
   const [draftBanner, setDraftBanner] = useState(bannerText);
   const [draftTheme, setDraftTheme] = useState<Theme>("green");
   const [advance7, setAdvance7] = useState(true);
-  const [otpRequired, setOtpRequired] = useState(true);
+  const [requireAccount, setRequireAccount] = useState(true);
   const [holdSlot, setHoldSlot] = useState("10");
   const [viewport, setViewport] = useState<"desktop" | "mobile">("desktop");
   const [toast, setToast] = useState<string | undefined>();
-  const [notifyLogs, setNotifyLogs] = useState<NotifyLog[]>([]);
-  const [notifyError, setNotifyError] = useState<string | undefined>();
-
-  // Log notifikasi real (audit F6) — 20 terbaru.
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch("/api/admin/notifications?limit=20", { cache: "no-store" });
-        if (res.status === 401) return;
-        const json = (await res.json()) as { ok: boolean; logs?: NotifyLog[] };
-        if (!cancelled && json.ok && json.logs) setNotifyLogs(json.logs);
-      } catch {
-        if (!cancelled) setNotifyError("Log notifikasi gagal dimuat.");
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const slots = useMemo(() => generateDaySlots(todayString()), []);
   const courts = COURTS.filter((court) => court.isActive);
@@ -133,8 +93,8 @@ export default function AdminMonitoringPage() {
           </p>
           <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-mist-shadow px-2.5 py-1 text-label-sm text-slate-whisper">
             <MIcon name="info" className="text-[15px]" />
-            Panel ini pratinjau demo — kecuali seksi Log Notifikasi yang datanya real. Toggle
-            maintenance di bawah nonaktif dan tidak memengaruhi web publik.
+            Panel ini sepenuhnya pratinjau demo — tidak ada kontrol yang memengaruhi web publik.
+            Toggle maintenance di bawah nonaktif.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -253,77 +213,6 @@ export default function AdminMonitoringPage() {
 
         {/* Workspace */}
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
-          {/* Log notifikasi (audit F6) */}
-          <div className="rounded-2xl bg-field-white p-5 shadow-sm sm:p-6 lg:col-span-12">
-            <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <MIcon name="notifications" className="text-[22px] text-court-green-deep" />
-                <h2 className="text-headline-sm text-on-surface">Log Notifikasi</h2>
-              </div>
-              <span className="text-body-sm text-slate-whisper">
-                Tiket, pengingat H-1/H-2 jam &amp; kedaluwarsa · 20 terbaru
-              </span>
-            </div>
-            {notifyError ? (
-              <p className="mt-3 text-body-sm text-slate-whisper">{notifyError}</p>
-            ) : notifyLogs.length === 0 ? (
-              <p className="mt-3 text-body-sm text-slate-whisper">
-                Belum ada notifikasi terkirim. Pengingat terjadwal jalan tiap 5 menit via cron.
-              </p>
-            ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full min-w-[640px] text-left text-body-sm">
-                  <thead>
-                    <tr className="border-b border-line text-label-sm uppercase tracking-wider text-slate-whisper">
-                      <th className="py-2 pr-3 font-semibold">Waktu</th>
-                      <th className="py-2 pr-3 font-semibold">Kode</th>
-                      <th className="py-2 pr-3 font-semibold">Tipe</th>
-                      <th className="py-2 pr-3 font-semibold">Kanal</th>
-                      <th className="py-2 font-semibold">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {notifyLogs.map((log) => (
-                      <tr key={log.id} className="border-b border-line/60 last:border-0">
-                        <td className="py-2 pr-3 tabular-nums text-slate-whisper">
-                          {new Date(log.sentAt).toLocaleString("id-ID", {
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </td>
-                        <td className="py-2 pr-3 font-mono text-on-surface">
-                          {log.code ?? "—"}
-                        </td>
-                        <td className="py-2 pr-3 text-on-surface">
-                          {NOTIFY_TYPE_LABEL[log.type]}
-                        </td>
-                        <td className="py-2 pr-3 capitalize text-slate-whisper">
-                          {log.channel}
-                        </td>
-                        <td className="py-2">
-                          {log.status === "terkirim" ? (
-                            <span className="rounded-full bg-court-grass-light px-2 py-0.5 text-label-sm font-bold text-court-green-deep">
-                              Terkirim
-                            </span>
-                          ) : (
-                            <span
-                              className="rounded-full bg-danger-light px-2 py-0.5 text-label-sm font-bold text-danger"
-                              title={log.error ?? ""}
-                            >
-                              Gagal
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
           {/* Simulator */}
           <div className="flex min-w-0 flex-col gap-4 lg:col-span-7">
             <div className="overflow-hidden rounded-2xl bg-field-white shadow-sm">
@@ -424,8 +313,7 @@ export default function AdminMonitoringPage() {
                         Sewa Lapangan Padel Cepat &amp; Tanpa Friksi
                       </h2>
                       <p className="text-body-md text-slate-whisper">
-                        Pilih lapangan, tentukan waktu main, dan dapatkan QR e-tiket otomatis via
-                        WhatsApp.
+                        Pilih lapangan, tentukan waktu main, dan akses e-tiket langsung dari akunmu.
                       </p>
                     </div>
 
@@ -478,7 +366,7 @@ export default function AdminMonitoringPage() {
                         <MIcon name="security" className="text-[20px] text-court-green-deep" />
                         <span className="text-body-sm text-slate-whisper">
                           Pemesanan publik dilindungi enkripsi transaksi SSL 256-bit &amp;
-                          verifikasi WhatsApp OTP.
+                          akun email + password.
                         </span>
                       </div>
                       <span className="text-label-sm font-bold text-court-green-deep">
@@ -600,13 +488,13 @@ export default function AdminMonitoringPage() {
               <div className="flex items-center justify-between rounded-xl bg-surface-container-low p-3.5">
                 <div className="min-w-0">
                   <span className="block text-label-md font-bold text-on-surface">
-                    Wajib OTP WhatsApp
+                    Wajib akun (email + password)
                   </span>
                   <span className="text-body-sm text-slate-whisper">
-                    Cegah bot booking dengan verifikasi kode 6 digit
+                    Checkout web hanya untuk pemain yang sudah masuk
                   </span>
                 </div>
-                <Toggle checked={otpRequired} onChange={setOtpRequired} className="shrink-0" />
+                <Toggle checked={requireAccount} onChange={setRequireAccount} className="shrink-0" />
               </div>
               <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-container-low p-3.5">
                 <div className="min-w-0">

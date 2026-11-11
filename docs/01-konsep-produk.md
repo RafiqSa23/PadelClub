@@ -2,7 +2,7 @@
 
 ## 1. Visi Produk
 
-**Satu kalimat:** Aplikasi web yang membuat pemain padel bisa memesan lapangan dalam 3 klik & 2 menit, dan membuat pemilik lapangan bisa mengelola jadwal tanpa buku tulis, tanpa WhatsApp manual, dan tanpa overbooking.
+**Satu kalimat:** Aplikasi web yang membuat pemain padel bisa memesan lapangan dengan cepat lewat akun sendiri, dan membuat pemilik lapangan bisa mengelola jadwal tanpa buku tulis, tanpa WhatsApp manual, dan tanpa overbooking.
 
 **Posisi produk:** Booking padel online-first — transaksi utama selesai di dalam aplikasi, tanpa perlu admin merespons chat.
 
@@ -42,10 +42,10 @@
 |---|---|---|
 | F1 | Pencarian slot (tanggal → lapangan → jam) | Menampilkan grid slot kosong/terisi yang bisa langsung diklik |
 | F2 | Keranjang booking multi-jam | Satu booking bisa mencakup beberapa jam berurutan di lapangan yang sama |
-| F3 | Checkout cepat | Cukup nomor HP + nama, verifikasi OTP, tanpa password |
-| F4 | Pembayaran QRIS otomatis | QRIS dinamis dari payment gateway, konfirmasi otomatis via webhook |
-| F5 | Tiket / bukti booking digital | Kode booking unik + detail lengkap, bisa diakses via tautan tanpa login |
-| F6 | Pengingat otomatis (WhatsApp + Email) | Notifikasi H-1 dan H+2 jam sebelum jadwal bermain |
+| F3 | Checkout dengan akun | Akun email + password (tanpa OTP); wajib masuk sebelum checkout |
+| F4 | Pembayaran otomatis | QRIS/Snap dari payment gateway, konfirmasi otomatis via webhook |
+| F5 | Tiket / bukti booking digital | Kode booking unik + detail lengkap, tersimpan di akun & bisa diakses via tautan tanpa login |
+| ~~F6~~ | ~~Pengingat otomatis (WhatsApp + Email)~~ | **Dibatalkan dari MVP 2026-11-12** → v2.0 ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)) |
 
 ### Sisi Admin
 
@@ -71,7 +71,7 @@
 - Rutin main & booking reguler, sering sewa 2 jam berturut-turut, kadang cancel.
 - **Kebutuhan:** bisa booking slot langganan, riwayat & jadwal pribadi, pengingat jelas.
 - **Kecemasan:** lupa jadwal atau tidak sadar sudah masuk jam bermain.
-- **Kesuksesan:** pengingat datang otomatis ke WhatsApp, tanpa dicek manual.
+- **Kesuksesan:** jadwal terdekat & tiket selalu tersedia di akun, tanpa perlu cek chat.
 
 ### P3 — Admin / Pemilik Lapangan (Pak Rudi, 45 th)
 - Mengelola 5-10 lapangan sendiri bersama 1-2 staf lapangan.
@@ -85,16 +85,18 @@
 
 Agar fokus MVP terjaga, hal-hal berikut **TIDAK** dibangun di versi awal:
 
-- ❌ Registrasi akun penuh dengan password & profil lengkap (cukup nomor HP + OTP).
+- ~~❌ Registrasi akun penuh dengan password & profil lengkap (cukup nomor HP + OTP)~~ — **dicabut 2026-11-12**: akun email + password menjadi syarat booking web ([ADR 0009](06-adr/0009-akun-email-password.md)).
 - ❌ Multi-venue / marketplace lintas klub (MVP: satu venue, 5-10 lapangan).
 - ❌ Sistem turnamen, ranking, atau fitur komunitas.
 - ❌ Loyalty point, voucher, atau program referral.
 - ❌ Aplikasi native (iOS/Android) — MVP berbasis web responsive.
-- ❌ Pembayaran selain QRIS (transfer bank manual, kartu kredit, paylater).
+- ~~❌ Pembayaran selain QRIS (transfer bank manual, kartu kredit, paylater)~~ — **dicabut 2026-10-01** via [ADR 0008](06-adr/0008-snap-popup-pengganti-core-api.md).
 - ❌ Streaming CCTV / live court view.
 - ❌ Sewa peralatan (raket, bola) sebagai item terpisah.
 - ❌ Manajemen pelatih / coach booking.
 - ❌ Fitur langganan (membership bulanan) — masuk roadmap v2.0.
+- ❌ Notifikasi WhatsApp/Email & pengingat otomatis — masuk v2.0 ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).
+- ❌ Verifikasi email, OTP, reset password mandiri — reset manual via admin di MVP.
 
 ---
 
@@ -105,9 +107,10 @@ Agar fokus MVP terjaga, hal-hal berikut **TIDAK** dibangun di versi awal:
 | Jumlah lapangan | 5–10 lapangan dalam satu venue, dapat ditambah/diubah oleh admin |
 | Jam operasional | Configurable per hari (admin bisa atur jam buka/tutup per hari) |
 | Durasi minimum booking | 1 jam (akan dikonfirmasi saat refinement) |
-| Pembayaran | QRIS saja di MVP (via payment gateway pihak ketiga) |
-| Autentikasi | Nomor HP + OTP, tanpa password |
-| Notifikasi | WhatsApp + Email otomatis |
+| Pembayaran | QRIS / Snap (semua metode yang diaktifkan Midtrans) |
+| Autentikasi | Akun email + password, tanpa OTP & tanpa verifikasi email |
+| Notifikasi | Tidak ada WhatsApp/Email di MVP; status dicek di aplikasi (v2.0) |
+| Data walk-in | User bayangan dianonimisasi otomatis setelah 7 hari |
 | Bahasa antarmuka | Bahasa Indonesia |
 
 ---
@@ -116,7 +119,7 @@ Agar fokus MVP terjaga, hal-hal berikut **TIDAK** dibangun di versi awal:
 
 - ≥ 60% booking bulanan selesai **tanpa** intervensi chat/manual dalam 3 bulan setelah launch.
 - Booking ganda turun menjadi 0 sejak adanya sistem slot grid terkunci.
-- ≥ 80% pelanggan menerima pengingat WhatsApp sukses terkirim sebelum jadwal bermain.
+- ≥ 80% pemain membuka tiket digital sebelum jadwal bermain (pengganti metrik notifikasi WhatsApp, [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).
 - Waktu rata-rata pelanggan menyelesaikan booking ≤ 2 menit.
 
 > Detail KPI lengkap ada di [`04-PRD.md`](04-PRD.md) bagian 1.3.

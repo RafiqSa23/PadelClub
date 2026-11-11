@@ -1,5 +1,5 @@
 /** Rate-limit in-memory sederhana untuk MVP (per instance).
- *  OTP & booking juga dilindungi batas DB (attempts / konflik unik).
+ *  Booking juga dilindungi batas DB (konflik unik slot).
  */
 const hits = new Map<string, number[]>();
 

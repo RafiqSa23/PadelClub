@@ -15,7 +15,6 @@ const NAV = [
   { href: "/booking", label: "Jadwal & Booking" },
   { href: "/tiket", label: "Cek Tiket" },
   { href: "/riwayat", label: "Riwayat" },
-  { href: "/admin", label: "Admin Portal" },
 ];
 
 function isActivePath(pathname: string, href: string) {

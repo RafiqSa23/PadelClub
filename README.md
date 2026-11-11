@@ -1,10 +1,11 @@
 # PadelClub — Padel Court Booking (MVP)
 
-Online booking for padel courts: instant slot search, multi-hour cart, OTP checkout,
-mock QRIS payment with 15-minute expiry, digital tickets with admin check-in,
-scheduled reminders, and admin reports. Built with **Next.js 16 + Drizzle ORM +
-Neon PostgreSQL**. All backend features **F1–F11 ✅**, verified end-to-end against
-a live database.
+Online booking for padel courts: instant slot search, multi-hour cart, email + password
+accounts, Snap payment with 15-minute expiry, digital tickets with admin check-in, and
+admin reports. No WhatsApp/Email notifications in the MVP (ADR 0010). Built with
+**Next.js 16 + Drizzle ORM + Neon PostgreSQL**. Backend features **F1–F11** are
+implemented; F3 is being migrated to email + password accounts (ADR 0009) and F6 was
+cancelled.
 
 > Product docs (Bahasa Indonesia) live in [`docs/`](docs/) — start at
 > [`docs/README.md`](docs/README.md). Implementation status: [`PROGRESS.md`](PROGRESS.md).
@@ -52,8 +53,8 @@ Seed admin: `admin / admin123` — change the password after first login
 
 ## Customer Flow
 
-`/booking` (slot grid → review → HP + OTP → Snap popup) → `/tiket/:kode` (no login)
-→ `/riwayat` (OTP session). Payment defaults to a **mock driver**
+`/booking` (slot grid → review → account login/register → Snap popup) → `/tiket/:kode`
+(no login) → `/riwayat` (account session). Payment defaults to a **mock driver**
 (`PAYMENT_DRIVER="mock"`, payload `MOCK-QRIS:ORD-<code>:<amount>`); switch to Midtrans
 Snap popup (ADR 0008) by filling `MIDTRANS_*` in `.env`. The UI is unchanged either way.
 
@@ -104,7 +105,7 @@ or `?secret=` query):
 | Endpoint | Schedule | Purpose |
 |---|---|---|
 | `GET /api/cron/expire` | every minute | Expire `menunggu_pembayaran` older than 15 min (ADR 0006) |
-| `GET /api/cron/reminders` | every 5 minutes | H-1 & H-2h reminders for confirmed bookings (F6) |
+| `GET /api/cron/anonymize` | daily | Anonymize walk-in guest users idle > 7 days (ADR 0011) |
 
 ## Environment
 
@@ -114,7 +115,7 @@ See [`.env.example`](.env.example). Never commit `.env` (gitignored).
 |---|---|
 | `DATABASE_URL` | Neon PostgreSQL connection string |
 | `SESSION_SECRET` | HMAC secret for customer sessions (min 32 chars, rotate in prod) |
-| `PAYMENT_DRIVER` / `NOTIFY_DRIVER` | `mock` (default, no credentials) |
+| `PAYMENT_DRIVER` | `mock` (default, no credentials) / `midtrans` |
 | `CRON_SECRET` | Auth for `/api/cron/*` |
 | `SEED_ADMIN_USER` / `SEED_ADMIN_PASSWORD` | Seed admin credentials |
 

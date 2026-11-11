@@ -92,6 +92,7 @@ export default function AdminScannerPage() {
     try {
       const res = await fetch(`/api/tickets/${encodeURIComponent(code)}`, {
         cache: "no-store",
+        credentials: "include",
       });
       const json = (await res.json()) as {
         ok: boolean;

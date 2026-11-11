@@ -48,7 +48,7 @@ Status berikut sudah dikunci secara fungsional di seluruh dokumen. Warna **diado
 | Field White (permukaan) | `#FFFFFF` | Kartu, modal, grid |
 | Mist Shadow (latar) | `#F4F6F8` | Latar halaman / kanvas grid |
 
-> Peran fungsional lain: warna status pembayaran memakai token `pending` / `error` dari `globals.css` (gateway QRIS: Midtrans — [ADR 0007](06-adr/0007-payment-gateway-midtrans.md), tanpa amplop warna brand gateway terpisah); warna error/gagal `#D32F2F` untuk pesan OTP salah atau pembayaran kedaluwarsa.
+> Peran fungsional lain: warna status pembayaran memakai token `pending` / `error` dari `globals.css` (gateway QRIS: Midtrans — [ADR 0007](06-adr/0007-payment-gateway-midtrans.md), tanpa amplop warna brand gateway terpisah); warna error/gagal `#D32F2F` untuk pesan login/registrasi salah atau pembayaran kedaluwarsa.
 
 ---
 
@@ -67,7 +67,7 @@ Status berikut sudah dikunci secara fungsional di seluruh dokumen. Warna **diado
 | H2 | 20px | 600 | Judul seksi, ringkasan booking |
 | Body | 16px | Regular | Teks inti |
 | Caption | 13px | 600 | Harga, jam operasional, label slot |
-| Micro | 12px | 500 | Timer OTP, keterangan status |
+| Micro | 12px | 500 | Timer pembayaran, keterangan status |
 
 - Letter-spacing: normal (0) pada body; negatif ringan pada display/headline (`-0,01`…`-0,02em`). **Tidak memakai** caps-kecil berlebihan kecuali label tombol/status.
 - Kontras minimal: teks utama ≥ WCAG AA (4.5:1) terhadap `Field White`.
@@ -78,7 +78,7 @@ Status berikut sudah dikunci secara fungsional di seluruh dokumen. Warna **diado
 
 ### Buttons
 - **Primary:** pill-shaped (radius 8–12px), background `Court Green`, teks putih; hover gelap (`Court Green Deep`); memuat status "processing" (spinner) saat menunggu webhook pembayaran.
-- **Secondary / Ghost:** stroke tipis abu (`Slate Whisper` 40%), background `Field White`; untuk "Kirim ulang OTP", aksi inline admin.
+- **Secondary / Ghost:** stroke tipis abu (`Slate Whisper` 40%), background `Field White`; untuk aksi inline admin.
 - **Danger:** `#D32F2F` hanya untuk aksi destruktif (batalkan booking).
 - Ukuran sentuh ≥ 44px (mobile-first).
 
@@ -93,8 +93,8 @@ Status berikut sudah dikunci secara fungsional di seluruh dokumen. Warna **diado
 
 ### Inputs / Forms
 - Field ber-stroke abu tipis (1px, `Slate Whisper` 50%), latar `Field White`; fokus: outline `Court Green` 2px.
-- Input nomor HP: klavier telepon (telephone input pattern, prefix +62), satu baris, tombol "Kirim OTP" berdampingan.
-- OTP: 6 kotak terpisah, angka tabular, tombol "Kirim ulang" dengan **countdown 60 detik** (per spesifikasi F3).
+- Input nomor HP: klavier telepon (telephone input pattern, prefix +62), satu baris.
+- Form akun (`/login`, `/daftar`): email + password (dengan tombol tampilkan password), nama & nomor HP saat daftar — tanpa OTP ([ADR 0009](06-adr/0009-akun-email-password.md)).
 
 ---
 
@@ -113,7 +113,7 @@ Status berikut sudah dikunci secara fungsional di seluruh dokumen. Warna **diado
 
 - **Feedback setiap aksi** (prinsip UX `02-user-journey.md` §1): perubahan warna grid, status tombol, konfirmasi sukses; transisi ≤ 200ms, tidak berlebihan (fokus kecepatan).
 - Slot yang dikunci real-time saat dipilih orang lain: animasi subtle + pesan "slot telah terisi" (skenario gagal `02-user-journey.md` §2) sambil **tetap menyimpan pilihan kosong lain**.
-- **Timer yang terlihat** untuk `Menunggu Pembayaran` (QRIS ekspirasi) dan countdown OTP.
+- **Timer yang terlihat** untuk `Menunggu Pembayaran` (QRIS ekspirasi).
 - **Aksesibilitas:** status slot tidak hanya dibedakan warna — tambahkan ikon/label (mis. label silang untuk `Maintenance`); kontras WCAG AA; target sentuh ≥ 44px; fokus keyboard terlihat.
 - Reduksi gerakan dihormati (`prefers-reduced-motion`).
 

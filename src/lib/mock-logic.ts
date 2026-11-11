@@ -18,7 +18,6 @@ import {
   CLOSURE_REASONS,
   COURTS,
   COURT_HOURS,
-  MOCK_OTP,
 } from "./mock-data";
 
 const NAME_POOL = [
@@ -233,5 +232,3 @@ export function slotRangeLabel(slot: Slot): string {
   const court = courtById(slot.courtId);
   return `${court.name} · ${hourLabel(slot.hour, slot.hour + 1)}`;
 }
-
-export { MOCK_OTP };

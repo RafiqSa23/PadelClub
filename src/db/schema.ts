@@ -27,32 +27,43 @@ export const paymentStatusEnum = pgEnum('payment_status', [
   'expired',
 ]);
 
-export const notificationChannelEnum = pgEnum('notification_channel', [
-  'whatsapp',
-  'email',
-]);
+export const users = pgTable(
+  'users',
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    // Akun pemain (ADR 0009): email + password. User bayangan walk-in tidak punya keduanya.
+    email: text(),
+    passwordHash: text(),
+    // Nomor HP tidak unik & tidak diverifikasi (tanpa OTP).
+    phone: text(),
+    name: text().notNull(),
+    // Walk-in/telepon (ADR 0011): dianonimisasi otomatis setelah 7 hari.
+    isGuest: boolean().notNull().default(false),
+    anonymizedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('users_email_unique').on(t.email),
+    index('users_guest_created_idx').on(t.isGuest, t.createdAt),
+    index('users_phone_idx').on(t.phone),
+  ],
+);
 
-export const notificationTypeEnum = pgEnum('notification_type', [
-  'tiket',
-  'pengingat_h1',
-  'pengingat_h2',
-  'sisa_pembayaran',
-  'kadaluarsa',
-]);
-
-export const notificationStatusEnum = pgEnum('notification_status', [
-  'terkirim',
-  'gagal',
-]);
-
-export const users = pgTable('users', {
-  id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  phone: text().notNull().unique(),
-  name: text().notNull(),
-  email: text(),
-  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-});
+// Sesi pemain (ADR 0009): token opaque di cookie, hash SHA-256 di DB.
+export const userSessions = pgTable(
+  'user_sessions',
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    userId: integer()
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: text().notNull().unique(),
+    expiresAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('user_sessions_expires_idx').on(t.expiresAt)],
+);
 
 export const courts = pgTable('courts', {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
@@ -181,43 +192,6 @@ export const closures = pgTable(
   ],
 );
 
-export const notificationLogs = pgTable(
-  'notification_logs',
-  {
-    id: integer().primaryKey().generatedAlwaysAsIdentity(),
-    bookingId: integer().references(() => bookings.id),
-    channel: notificationChannelEnum().notNull(),
-    type: notificationTypeEnum().notNull(),
-    status: notificationStatusEnum().notNull(),
-    sentAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    error: text(),
-  },
-  (t) => [
-    // Idempotensi cron pengingat per booking + audit log panel admin.
-    index('notification_logs_booking_idx').on(t.bookingId),
-    index('notification_logs_sent_idx').on(t.sentAt),
-  ],
-);
-
-// OTP untuk checkout cepat (F3): kode di-hash, TTL 5 menit, 1x pakai,
-// max 5x gagal, kirim-ulang min 60 detik (ditegakkan di application layer).
-export const otpCodes = pgTable(
-  'otp_codes',
-  {
-    id: integer().primaryKey().generatedAlwaysAsIdentity(),
-    phone: text().notNull(),
-    codeHash: text().notNull(),
-    expiresAt: timestamp({ withTimezone: true }).notNull(),
-    attempts: integer().notNull().default(0),
-    consumedAt: timestamp({ withTimezone: true }),
-    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    // Cek kirim-ulang & verifikasi: OTP terbaru per nomor.
-    index('otp_codes_phone_created_idx').on(t.phone, t.createdAt),
-  ],
-);
-
 // Auth admin (pengganti cookie demo). Password di-hash (scrypt).
 export const admins = pgTable('admins', {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
@@ -246,6 +220,7 @@ export const adminSessions = pgTable(
 
 export const usersRelations = relations(users, ({ many }) => ({
   bookings: many(bookings),
+  sessions: many(userSessions),
 }));
 
 export const courtsRelations = relations(courts, ({ many }) => ({
@@ -285,14 +260,9 @@ export const closuresRelations = relations(closures, ({ one }) => ({
   court: one(courts, { fields: [closures.courtId], references: [courts.id] }),
 }));
 
-export const notificationLogsRelations = relations(notificationLogs, ({ one }) => ({
-  booking: one(bookings, {
-    fields: [notificationLogs.bookingId],
-    references: [bookings.id],
-  }),
+export const userSessionsRelations = relations(userSessions, ({ one }) => ({
+  user: one(users, { fields: [userSessions.userId], references: [users.id] }),
 }));
-
-export const otpCodesRelations = relations(otpCodes, () => ({}));
 
 export const adminsRelations = relations(admins, ({ many }) => ({
   sessions: many(adminSessions),

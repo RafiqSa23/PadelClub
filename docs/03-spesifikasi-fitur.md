@@ -7,10 +7,10 @@
 
 - [F1 — Pencarian Slot (Tanggal → Lapangan → Jam)](#f1--pencarian-slot)
 - [F2 — Keranjang Booking Multi-Jam](#f2--keranjang-booking-multi-jam)
-- [F3 — Checkout Cepat (Nomor HP + OTP)](#f3--checkout-cepat-nomor-hp--otp)
-- [F4 — Pembayaran QRIS Otomatis](#f4--pembayaran-qris-otomatis)
+- [F3 — Checkout (Akun Email + Password)](#f3--checkout-akun-email--password)
+- [F4 — Pembayaran Otomatis (QRIS / Snap)](#f4--pembayaran-otomatis-qris--snap)
 - [F5 — Tiket / Bukti Booking Digital](#f5--tiket--bukti-booking-digital)
-- [F6 — Pengingat Otomatis (WhatsApp + Email)](#f6--pengingat-otomatis-whatsapp--email)
+- [F6 — Pengingat Otomatis (Dibatalkan)](#f6--pengingat-otomatis-dibatalkan)
 - [F7 — Dashboard Jadwal Harian](#f7--dashboard-jadwal-harian)
 - [F8 — Booking Manual (Walk-in / Telepon)](#f8--booking-manual)
 - [F9 — Tutup Lapangan (Maintenance)](#f9--tutup-lapangan-maintenance)
@@ -49,66 +49,62 @@
 
 ---
 
-## F3 — Checkout Cepat (Nomor HP + OTP)
+## F3 — Checkout (Akun Email + Password)
 
-- **Tujuan:** Identifikasi pelanggan semudah mungkin tanpa password.
+- **Tujuan:** Checkout hanya untuk pemain terdaftar agar booking & riwayat tersimpan di akun.
 - **Alur:**
-  1. Input nama + nomor HP.
-  2. Sistem mengirim OTP via WhatsApp (fallback SMS).
-  3. Input kode OTP → akun terverifikasi → lanjut pembayaran.
+  1. Pelanggan memilih slot → sistem memeriksa sesi. Tanpa sesi → diarahkan ke `/login` (masuk atau daftar).
+  2. Daftar: nama, email, password, nomor HP → akun aktif langsung (tanpa verifikasi email/OTP).
+  3. Setelah login → kembali ke `/booking` dengan slot pilihan tetap → lanjut pembayaran.
 - **Kriteria Terima (AC):**
-  - OTP terkirim ≤ 30 detik setelah permintaan.
-  - OTP berlaku 5 menit dan hanya bisa digunakan sekali.
-  - Tombol "Kirim ulang" muncul setelah 60 detik.
-  - Nomor HP dianggap terdaftar (create akun otomatis saat pertama kali).
-  - Maksimal 5 percobaan verifikasi gagal per nomor sebelum blokir sementara.
-- **Keamanan:** Batasi percobaan (rate-limit), data nomor HP disimpan terenkripsi (detail TBD).
+  - Registrasi menolak email yang sudah terdaftar (409) dan password < 8 karakter (400).
+  - Login menolak email/password salah tanpa membocorkan mana yang salah.
+  - `/booking` tanpa sesi selalu diarahkan ke `/login`, lalu kembali ke wizard dengan pilihan slot utuh.
+  - Nomor HP wajib diisi saat registrasi, tetapi **tidak diverifikasi** (tanpa OTP).
+  - Password disimpan sebagai hash scrypt; API tidak pernah mengembalikan password/hash.
+  - Rate-limit registrasi & login per IP; percobaan gagal dicatat untuk audit admin.
+  - Lupa password: tidak ada reset mandiri di MVP; admin dapat mereset dari panel.
+- **Batasan:** Tanpa OTP, tanpa verifikasi email, tanpa reset password mandiri ([ADR 0009](06-adr/0009-akun-email-password.md)).
 
 ---
 
-## F4 — Pembayaran QRIS Otomatis
+## F4 — Pembayaran Otomatis (QRIS / Snap)
 
 - **Tujuan:** Konfirmasi pembayaran otomatis tanpa input manual dari admin.
 - **Alur:**
-  1. Sistem membuat invoice → payment gateway menghasilkan QRIS (dinamis).
-  2. Pelanggan pindai QRIS / bayar dari aplikasi e-wallet.
-  3. Webhook gateway mengirim status seperti `PAID` → booking otomatis `Terkonfirmasi`.
+  1. Sistem membuat invoice → payment gateway (Midtrans Snap) menghasilkan pembayaran (QRIS atau semua metode yang diaktifkan).
+  2. Pelanggan menyelesaikan pembayaran via Snap popup / e-wallet / transfer bank.
+  3. Webhook gateway mengirim status seperti `PAID`/`settlement` → booking otomatis `Terkonfirmasi`.
 - **Kriteria Terima (AC):**
   - Booking berstatus `Menunggu Pembayaran` sejak invoice dibuat.
-  - QRIS aktif **15 menit** sejak invoice dibuat (keputusan [ADR 0006](06-adr/0006-batas-waktu-pembayaran-qris.md); batas gateway umumnya 15–30 menit).
-  - Email & WhatsApp berisi tautan pembayaran ulang jika QRIS kedaluwarsa.
-  - Saat `PAID` diterima: status booking berubah `Terkonfirmasi` ≤ 10 detik, tiket dikirim otomatis.
-  - Pesanan tidak dibayar setelah batas waktu → slot kembali `Kosong`, pelanggan diberi notifikasi.
-- **Batasan:** Hanya QRIS di MVP. Webhook signature diverifikasi **SHA-512** (`order_id`, `gross_amount`, `status_code`, server key) dengan handler idempoten — Midtrans, [ADR 0007](06-adr/0007-payment-gateway-midtrans.md).
+  - Pembayaran aktif **15 menit** sejak invoice dibuat (keputusan [ADR 0006](06-adr/0006-batas-waktu-pembayaran-qris.md); batas gateway umumnya 15–30 menit).
+  - Halaman booking kedaluwarsa & `/riwayat` menampilkan CTA **"Pesan ulang"** ke jadwal yang masih tersedia (invoice lama tidak dapat dibayar ulang — tidak ada notifikasi tautan, [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).
+  - Saat `PAID` diterima: status booking berubah `Terkonfirmasi` ≤ 10 detik, tiket otomatis aktif di `/tiket/:kode` dan `/riwayat`.
+  - Pesanan tidak dibayar setelah batas waktu → slot kembali `Kosong`; status terlihat di `/riwayat` (tanpa notifikasi eksternal).
+- **Batasan:** Driver default `mock` (kredensial Midtrans belum diisi); saat `PAYMENT_DRIVER="midtrans"` + `MIDTRANS_SERVER_KEY` diisi, gunakan Midtrans Snap dengan semua metode pembayaran (kecualian non-goal QRIS-only dicabut, [ADR 0008](06-adr/0008-snap-popup-pengganti-core-api.md)). Webhook signature diverifikasi **SHA-512** (`order_id`, `gross_amount`, `status_code`, server key) dengan handler idempoten — Midtrans, [ADR 0007](06-adr/0007-payment-gateway-midtrans.md).
 
 ---
 
 ## F5 — Tiket / Bukti Booking Digital
 
 - **Tujuan:** Bukti valid yang bisa dilihat, dibagikan, dan digunakan untuk check-in.
-- **Alur:** Saat `Terkonfirmasi`, sistem menghasilkan tiket → dikirim via WhatsApp + Email → bisa diakses lewat `/tiket/:kode`.
+- **Alur:** Saat `Terkonfirmasi`, sistem membuat tiket → dapat dibuka di `/riwayat` (login) atau lewat tautan `/tiket/:kode` (tanpa login). Tidak ada pengiriman WhatsApp/Email.
 - **Kriteria Terima (AC):**
   - Tiket memuat: kode unik, nama&HP pemesan, lapangan, tanggal, jam, durasi, total harga, status.
-  - Tautan tiket dapat dibuka tanpa login (token/kode unik).
+  - Tautan tiket dapat dibuka tanpa login (token/kode unik) dan selalu tersedia di `/riwayat` akun pemesan.
   - Admin dapat menandai pelanggan "sudah check-in" dari halaman tiket.
   - Tiket berstatus `Batal`/`Tutup` menampilkan pemberitahuan jelas bila dilihat.
+  - Tidak ada tiket yang dikirim otomatis ke kanal eksternal (ditunda v2.0, [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).
 - **Batasan:** Tiket tidak bisa dipindah-tangankan secara langsung (pemindahan hak di luar MVP).
 
 ---
 
-## F6 — Pengingat Otomatis (WhatsApp + Email)
+## F6 — Pengingat Otomatis (Dibatalkan)
 
-- **Tujuan:** Mengurangi lupa jadwal (masalah C6).
-- **Alur:**
-  1. Setelah `Terkonfirmasi`, jadwalkan dua notifikasi.
-  2. Kirim saat H-1 dan H+2 jam sebelum jam mulai.
-- **Kriteria Terima (AC):**
-  - Pesan dikirim tepat 24 jam dan 2 jam sebelum jadwal (± toleransi 2 menit).
-  - Isi pesan: tanggal, jam, lapangan, nama, kode booking.
-  - Terkirim ke WhatsApp (% nomor Indonesia) dan email (bila tersedia).
-  - Upaya ulang otomatis 3x jika gagal terkirim (interval TBD).
-  - Log pengiriman tersimpan untuk audit.
-- **Batasan:** Email opsional bila pelanggan tidak mengisinya; WhatsApp wajib.
+- **Status:** **Dibatalkan dari MVP (2026-11-12)**, pindah ke v2.0 ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)). Nomor F dipertahankan agar F7–F11 tidak berubah.
+- **Alasan:** tidak ada kanal notifikasi WhatsApp/Email di MVP; pengingat membutuhkan penyedia pihak ketiga yang belum dipilih (PRD Q5).
+- **Pengganti sementara:** jadwal terdekat ditampilkan di `/riwayat` dan `/tiket`, tanpa push.
+- **Syarat kebangkitan (v2.0):** kanal notifikasi terpasang + template pesan disetujui penyedia; AC lama (H-1 & H+2 jam, retry 3x, log audit) dipakai kembali.
 
 ---
 
@@ -133,7 +129,9 @@
   - Form tervalidasi (nama & HP wajib, slot tidak boleh bentrok).
   - Booking "Sudah Bayar" langsung berstatus `Terkonfirmasi`; "Belum Bayar" berstatus `Menunggu Pembayaran`.
   - Sistem menolak apabila slot yang dipilih sudah `Terkonfirmasi`/`Tutup`.
-  - Tiket langsung dapat diakses/dikirim via WhatsApp oleh admin.
+  - Pelanggan walk-in dibuat sebagai **user bayangan** (`is_guest`), didedupe berdasarkan nomor HP dalam 7 hari terakhir ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
+  - User bayangan tanpa booking aktif > 7 hari dianonimisasi otomatis (nama→"Tamu", HP/email kosong); booking tetap tersimpan untuk laporan.
+  - Admin dapat mencetak/membagikan tautan tiket secara manual — sistem tidak mengirim WhatsApp/Email.
 
 ---
 
@@ -156,7 +154,7 @@
 - **Kriteria Terima (AC):**
   - Daftar booking dapat difilter & dicari (nama/HP/kode/lapangan/tanggal).
   - Aksi yang tersedia: lihat detail, konfirmasi manual (jika perlu), batalkan.
-  - Pengingat otomatis bagi booking `Menunggu Pembayaran` yang hampir kedaluwarsa.
+  - Booking `Menunggu Pembayaran` yang hampir kedaluwarsa ditandai badge di panel admin (tanpa notifikasi ke pemain — [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).
 - **Batasan:** Di MVP, pembayaran QRIS otomatis; konfirmasi manual hanya untuk remediasi / walk-in.
 
 ---

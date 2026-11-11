@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, or, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { bookingSlots, bookings, courts, payments, users } from '@/db/schema';
 import { isValidPhone, jsonError, jsonOk, normalizePhone } from '@/lib/api';
@@ -165,13 +165,25 @@ export async function POST(request: Request) {
   const phone = normalizePhone(body.phone);
   const paid = body.paid === true;
 
-  // Tautkan ke user bila nomor sudah terdaftar; jika belum, buat akun dasar.
-  const existing = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
-  let userId: number | null = existing[0]?.id ?? null;
+  // User bayangan walk-in (ADR 0011): dedupe nomor HP dalam 7 hari terakhir.
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const existing = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(
+      and(
+        eq(users.phone, phone),
+        eq(users.isGuest, true),
+        gte(users.createdAt, cutoff),
+      ),
+    )
+    .orderBy(desc(users.createdAt))
+    .limit(1);
+  let userId = existing[0]?.id;
   if (!userId) {
     const inserted = await db
       .insert(users)
-      .values({ phone, name: body.name.trim() })
+      .values({ phone, name: body.name.trim(), isGuest: true })
       .returning({ id: users.id });
     userId = inserted[0].id;
   }

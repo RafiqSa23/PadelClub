@@ -35,8 +35,6 @@ export const COURT_HOURS: CourtHour[] = [
 
 export const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
-export const MOCK_OTP = "123456";
-
 /** Alasan penutupan lapangan dummy. */
 export const CLOSURE_REASONS = [
   "Perbaikan net",

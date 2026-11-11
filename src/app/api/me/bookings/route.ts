@@ -1,15 +1,13 @@
 import { eq } from 'drizzle-orm';
-import { cookies } from 'next/headers';
 import { db } from '@/db';
 import { bookingSlots, bookings, courts } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
-import { CUSTOMER_SESSION_COOKIE, verifyCustomerSession } from '@/lib/session';
+import { getCurrentUser } from '@/lib/user-auth';
 
 /** Riwayat booking milik sesi pelanggan (dipakai `/riwayat` Batch 2). */
 export async function GET() {
-  const store = await cookies();
-  const session = verifyCustomerSession(store.get(CUSTOMER_SESSION_COOKIE)?.value ?? '');
-  if (!session) return jsonError('Login dengan OTP terlebih dahulu', 401);
+  const user = await getCurrentUser();
+  if (!user) return jsonError('Masuk ke akun terlebih dahulu', 401);
 
   const rows = await db
     .select({
@@ -27,7 +25,7 @@ export async function GET() {
     .from(bookings)
     .innerJoin(courts, eq(bookings.courtId, courts.id))
     .innerJoin(bookingSlots, eq(bookingSlots.bookingId, bookings.id))
-    .where(eq(bookings.userId, session.uid));
+    .where(eq(bookings.userId, user.id));
 
   const byId = new Map<
     number,

@@ -6,12 +6,14 @@ import {
   isoDate,
   requireServer,
   TEST_DATE,
+  TEST_EMAIL,
+  TEST_PASSWORD,
   TEST_PHONE,
 } from "../helpers/api";
 
 /**
- * Alur pelanggan F1–F5 lewat HTTP: cari slot → OTP → booking → bayar (mock) →
- * webhook → tiket. Satu nomor HP, satu sesi, ±15 request.
+ * Alur pelanggan F1–F5 lewat HTTP: cari slot → daftar akun → booking → bayar
+ * (mock) → webhook → tiket. Satu akun, satu sesi, ±15 request.
  */
 
 const client = apiClient();
@@ -20,7 +22,6 @@ let courtId = 0;
 let hour = 0;
 let bookingCode = "";
 let orderId = "";
-let otpCode = "";
 let slotVersion = 0;
 
 beforeAll(async () => {
@@ -74,29 +75,35 @@ describe("alur pelanggan (F1–F5)", () => {
     }
   });
 
-  it("minta OTP mengembalikan debugCode di mode non-produksi (F3)", async () => {
-    const res = await client.post<{ sentTo: string; debugCode?: string }>("/api/otp/request", {
-      phone: TEST_PHONE,
-    });
+  it("registrasi akun email + password membuat sesi (F3)", async () => {
+    const res = await client.post<{ user: { email: string; phone: string } }>(
+      "/api/auth/register",
+      {
+        name: "Pemain Test",
+        email: TEST_EMAIL,
+        password: TEST_PASSWORD,
+        phone: TEST_PHONE,
+      },
+    );
     expect(res.status).toBe(201);
-    expect(res.body.sentTo).toBe(TEST_PHONE);
-    expect(res.body.debugCode).toMatch(/^\d{6}$/);
-    otpCode = res.body.debugCode!;
-  });
-
-  it("kirim ulang OTP dalam 60 detik ditolak 429 (F3)", async () => {
-    const res = await client.post("/api/otp/request", { phone: TEST_PHONE });
-    expect(res.status).toBe(429);
-  });
-
-  it("verifikasi OTP membuat sesi pelanggan (F3)", async () => {
-    const res = await client.post("/api/otp/verify", {
-      phone: TEST_PHONE,
-      code: otpCode,
-      name: "Pemain Test",
-    });
-    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe(TEST_EMAIL);
     expect(client.hasCookie("padel_session")).toBe(true);
+  });
+
+  it("registrasi email yang sama ditolak 409 (F3)", async () => {
+    const res = await client.post("/api/auth/register", {
+      name: "Pemain Test",
+      email: TEST_EMAIL,
+      password: TEST_PASSWORD,
+      phone: TEST_PHONE,
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("profil sesi mengembalikan akun yang login (F3)", async () => {
+    const res = await client.get<{ user: { email: string } }>("/api/auth/me");
+    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe(TEST_EMAIL);
   });
 
   it("booking online menahan slot 15 menit (F2)", async () => {

@@ -1,6 +1,6 @@
 # ADR 0002 — Akun Pengguna Cukup Nomor HP (OTP, Tanpa Password)
 
-- **Status:** Accepted
+- **Status:** Superseded oleh [ADR 0009](0009-akun-email-password.md) (2026-11-12)
 - **Tanggal:** 2026-09-22
 - **Pemilik:** Product Owner
 

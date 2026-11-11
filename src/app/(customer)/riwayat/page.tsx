@@ -162,7 +162,7 @@ export default function RiwayatPage() {
             <Card>
               <EmptyState
                 title="Masuk untuk melihat riwayat"
-                description="Riwayat booking tersimpan di akun nomor HP kamu. Masuk dengan OTP untuk melihatnya."
+                description="Riwayat booking tersimpan di akunmu. Masuk dengan email dan password untuk melihatnya."
                 action={<ButtonLink href="/login">Masuk / daftar</ButtonLink>}
               />
             </Card>
