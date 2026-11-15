@@ -97,7 +97,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 
 ## Sisa Pekerjaan (Belum Dikerjakan)
 
-Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbarui 2026-11-12 setelah revisi scope auth & notifikasi.
+Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbarui 2026-11-15 setelah akun/operasional (ADR 0012–0013).
 
 ### Revisi scope 2026-11-12 (ADR 0009–0011) — sudah diimplementasikan
 - **F3 berubah:** akun email + password tanpa OTP, wajib sesi sebelum checkout ([ADR 0009](docs/06-adr/0009-akun-email-password.md)). Selesai 2026-11-12.
@@ -111,6 +111,22 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - ✅ Selesai Batch 3 (2026-09-30): F7 + F10 penuh (list/filter/cari, confirm/cancel, overview KPI, tutup-dari-grid, refresh 15 dtk) + wiring `/admin/booking`, `/admin/dashboard`, `/admin/jadwal`. Docs API v1.0-batch3 (19 paths / 21 operasi).
 - ✅ Selesai Batch 4 (2026-09-30): F4 penuh (charge idempoten, polling status, webhook PAID → `terkonfirmasi` + tiket, cron expire 15 mnt + log `kadaluarsa`) + wiring `/booking` (QR payload mock + polling 5 dtk + simulasi-bayar + state kedaluwarsa). Docs API v1.0-batch4 (23 paths / 25 operasi). Uji: charge → webhook → tiket + expiry paksa → cron → slot `kosong`.
 - ✅ Selesai Batch 7 (2026-09-30): F11 penuh (JSON ringkasan + per lapangan, CSV server-side) + wiring `/admin/laporan`. Docs API v1.0-batch7 final (28 paths / 30 operasi). **Seluruh F1–F11 Backend ✅.**
+
+### Gap terbuka (2026-11-15) — belum dikerjakan
+
+**P1 — sebelum produksi**
+- `GET /api/bookings/{code}` masih **publik** dan mengembalikan `customerName`/`customerPhone`. Tiket `/api/tickets/{kode}` sudah owner-only; endpoint ini belum. Kunci ke pemilik sesi/admin, atau hapus dari alur publik (PRD §4.4 Security & Privacy).
+- **Midtrans sandbox e2e belum diuji.** Butuh `MIDTRANS_SERVER_KEY`, `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY` sandbox, `APP_PUBLIC_URL` publik (ngrok), dan webhook yang bisa menjangkau URL tersebut.
+- **Vercel Cron belum diverifikasi di deployment.** Set `CRON_SECRET` di Vercel; pastikan paket mengizinkan `*/5 * * * *` untuk `/api/cron/expire` (Hobby membatasi jadwal → expire bisa tertunda). Lokal hanya diuji lewat pemanggilan langsung.
+- **CI `api-tests` belum pernah jalan.** Job digerbangi `API_TESTS_ENABLED=1` + secret `TEST_DATABASE_URL`; belum diset di repo GitHub. Job `quality` (lint/typecheck/build) juga belum diverifikasi di runner.
+
+**P2 — setelah MVP stabil**
+- `/admin/monitoring` masih demo statis (`src/lib/mock-data`); belum ada feed monitoring real (di luar sitemap PRD).
+- **Reset lupa password mandiri** dan verifikasi email belum ada (PRD Q7). Reset tetap via `/admin/users`; ganti password hanya saat sudah login (ADR 0012).
+- Scanner kamera gate hanya pratinjau; validasi tiket via input manual (`/admin/scanner`).
+- Rate-limit DB: belum ada test lintas-instance; pembersihan baris `rate_limits` hanya menumpang `/api/cron/expire`.
+- Cakupan test: tiket belum menguji eksplisit 401 (tanpa sesi) / 403 (pemain lain); reset password user bayangan 409 belum ditest (baru diverifikasi manual).
+- `/api/bookings/{code}` juga dipakai test (`01-customer-flow`) sebagai detail publik — bila endpoint dikunci, test dan dokumen §5b.2 ikut diubah.
 
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 
