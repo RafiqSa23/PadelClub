@@ -62,9 +62,10 @@
   - `/booking` tanpa sesi selalu diarahkan ke `/login`, lalu kembali ke wizard dengan pilihan slot utuh.
   - Nomor HP wajib diisi saat registrasi, tetapi **tidak diverifikasi** (tanpa OTP).
   - Password disimpan sebagai hash scrypt; API tidak pernah mengembalikan password/hash.
-  - Rate-limit registrasi & login per IP; percobaan gagal dicatat untuk audit admin.
-  - Lupa password: tidak ada reset mandiri di MVP; admin dapat mereset dari panel.
-- **Batasan:** Tanpa OTP, tanpa verifikasi email, tanpa reset password mandiri ([ADR 0009](06-adr/0009-akun-email-password.md)).
+  - Rate-limit registrasi & login per IP (tabel `rate_limits`, berlaku lintas-instance).
+  - Ganti password mandiri saat login di `/akun`: wajib password lama, password baru minimal 8 karakter, sesi perangkat lain dicabut ([ADR 0012](06-adr/0012-ganti-password-mandiri.md)).
+  - Lupa password: tidak ada reset mandiri di MVP; admin dapat mereset dari panel `/admin/users`.
+- **Batasan:** Tanpa OTP, tanpa verifikasi email, tanpa reset lupa password mandiri; ganti password hanya saat sudah login ([ADR 0009](06-adr/0009-akun-email-password.md), [ADR 0012](06-adr/0012-ganti-password-mandiri.md)).
 
 ---
 
@@ -88,10 +89,10 @@
 ## F5 — Tiket / Bukti Booking Digital
 
 - **Tujuan:** Bukti valid yang bisa dilihat, dibagikan, dan digunakan untuk check-in.
-- **Alur:** Saat `Terkonfirmasi`, sistem membuat tiket → dapat dibuka di `/riwayat` (login) atau lewat tautan `/tiket/:kode` (tanpa login). Tidak ada pengiriman WhatsApp/Email.
+- **Alur:** Saat `Terkonfirmasi`, sistem membuat tiket → dapat dibuka di `/riwayat` atau lewat tautan `/tiket/:kode` (wajib login sebagai pemilik; admin boleh membuka semua tiket). Tidak ada pengiriman WhatsApp/Email.
 - **Kriteria Terima (AC):**
   - Tiket memuat: kode unik, nama&HP pemesan, lapangan, tanggal, jam, durasi, total harga, status.
-  - Tautan tiket dapat dibuka tanpa login (token/kode unik) dan selalu tersedia di `/riwayat` akun pemesan.
+  - Tiket hanya bisa dibuka pemiliknya (sesi `padel_session` cocok `booking.userId`) atau admin bersesi; tanpa login → diarahkan ke `/login`, pemain lain → pesan "bukan pemilik tiket". Tiket selalu tersedia di `/riwayat` akun pemesan.
   - Admin dapat menandai pelanggan "sudah check-in" dari halaman tiket.
   - Tiket berstatus `Batal`/`Tutup` menampilkan pemberitahuan jelas bila dilihat.
   - Tidak ada tiket yang dikirim otomatis ke kanal eksternal (ditunda v2.0, [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).

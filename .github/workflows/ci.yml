@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  quality:
+    name: Lint, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_MIDTRANS_IS_PRODUCTION: "false"
+
+  api-tests:
+    name: API tests (test DB)
+    runs-on: ubuntu-latest
+    # Aktifkan dengan repo variable API_TESTS_ENABLED=1 dan secret TEST_DATABASE_URL.
+    if: vars.API_TESTS_ENABLED == '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tulis .env.test
+        run: |
+          cat > .env.test <<EOF
+          DATABASE_URL="${{ secrets.TEST_DATABASE_URL }}"
+          SEED_ADMIN_USER="admin"
+          SEED_ADMIN_PASSWORD="admin123"
+          CRON_SECRET="test-cron-secret"
+          PAYMENT_DRIVER="mock"
+          TEST_BASE_URL="http://localhost:3100"
+          TEST_EMAIL="pemain-test@padelclub.test"
+          TEST_PASSWORD="rahasia-test-123"
+          TEST_PHONE="6280000000001"
+          TEST_DB_CONFIRMED="1"
+          EOF
+      - name: Migrate + seed test DB
+        run: |
+          npm run db:migrate:test
+          npm run db:seed:test
+      - name: Start dev:test
+        run: |
+          nohup npm run dev:test > /tmp/devtest.log 2>&1 &
+      - name: Wait for server
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3100/api/health > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "Server test tidak siap"; cat /tmp/devtest.log; exit 1
+      - name: Run API tests
+        run: npm run test:api
+      - name: Log server on failure
+        if: failure()
+        run: cat /tmp/devtest.log

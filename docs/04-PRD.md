@@ -43,7 +43,7 @@ Aplikasi web booking padel yang menampilkan grid slot real-time, memungkinkan pe
 | US-01 | Sebagai pemain, saya ingin melihat jam kosong pada tanggal pilihan agar tidak perlu bertanya ke admin | Grid menampilkan status slot terkini; slot kosong dapat diklik, slot terisi tidak |
 | US-02 | Sebagai pemain, saya ingin memesan beberapa jam sekaligus agar sesi bermain saya lebih panjang | Slot berurutan dalam 1 lapangan bisa dipilih; subtotal dihitung otomatis |
 | US-03 | Sebagai pemain, saya ingin membayar dengan QRIS agar proses cepat & tidak perlu transfer manual | QRIS ditampilkan setelah checkout; status berubah otomatis ≤ 10 detik setelah bayar |
-| US-04 | Sebagai pemain, saya ingin mendapatkan tiket digital setelah bayar sebagai bukti booking | Tiket berisi kode unik + detail lengkap, tersimpan di `/riwayat` akun, bisa dibuka tanpa login lewat tautan |
+| US-04 | Sebagai pemain, saya ingin mendapatkan tiket digital setelah bayar sebagai bukti booking | Tiket berisi kode unik + detail lengkap, tersimpan di `/riwayat` akun, hanya bisa dibuka pemilik setelah login (admin boleh membuka semua tiket) |
 | ~~US-05~~ | ~~Sebagai pemain, saya ingin diingatkan jadwal main agar tidak lupa~~ → **dibatalkan 2026-11-12**, pindah v2.0 ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)) | — |
 | US-06 | Sebagai pemain, saya ingin membuat akun agar booking & riwayat saya tersimpan | Registrasi email + password; wajib login sebelum checkout; tanpa OTP |
 | US-07 | Sebagai admin, saya ingin melihat jadwal harian seluruh lapangan dalam satu layar | Grid hari ini tampil semua status; akses detail dengan 1 klik |
@@ -62,7 +62,7 @@ Aplikasi web booking padel yang menampilkan grid slot real-time, memungkinkan pe
 - ~~❌ Pembayaran selain QRIS~~ — **dicabut 2026-10-01**: pembayaran via Midtrans Snap membuka semua metode (pengecualian disetujui Product Owner, [ADR 0008](06-adr/0008-snap-popup-pengganti-core-api.md))
 - ❌ Membership langganan (masuk v2.0)
 - ❌ Notifikasi WhatsApp/Email & pengingat otomatis (masuk v2.0, [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md))
-- ❌ Verifikasi email, OTP, dan reset password mandiri (reset manual via admin sampai PRD Q7 terjawab)
+- ❌ Verifikasi email, OTP, dan **reset lupa password** mandiri (reset manual via admin sampai PRD Q7 terjawab; *ganti* password saat sudah login tetap tersedia, [ADR 0012](06-adr/0012-ganti-password-mandiri.md))
 
 ---
 
@@ -95,19 +95,21 @@ Web App (Customer / Admin) → API Backend → Database
 ### 4.3 Database & Data Model
 **Neon PostgreSQL + Drizzle ORM** ([ADR 0005](06-adr/0005-tech-stack-nextjs-drizzle.md)); skema di [`../src/db/schema.ts`](../src/db/schema.ts):
 
-- `users`, `user_sessions`, `courts`, `court_hours`, `bookings`, `booking_slots`, `payments`, `closures`.
+- `users`, `user_sessions`, `courts`, `court_hours`, `bookings`, `booking_slots`, `payments`, `closures`, `rate_limits`.
 - **User bayangan:** booking walk-in memakai baris `users` dengan `is_guest = true`; setelah 7 hari tanpa booking aktif, nama & kontak dianonimisasi (`anonymized_at`) tetapi baris user dan booking tetap ada untuk laporan ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
+- **Rate-limit persisten:** tabel `rate_limits` (`key`, `count`, `windowStart`) menopang batas endpoint sensitif lintas-instance; endpoint jadwal yang di-polling tetap in-memory ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)).
 - `notification_logs` dipensiunkan ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)) dan dijadwalkan di-drop saat migrasi implementasi.
 
 > Pemetaan status booking & slot mengikuti matriks di [02 — User Journey §6](02-user-journey.md#6-matriks-status-slot-dipakai-konsisten-di-seluruh-dokumen).
 
 ### 4.4 Security & Privacy
-- Sesi pelanggan memakai cookie `padel_session` (HMAC-SHA256) yang membawa `userId`; password disimpan sebagai hash **scrypt** ([ADR 0009](06-adr/0009-akun-email-password.md)).
+- Sesi pelanggan memakai cookie `padel_session` berisi token acak (hash SHA-256 disimpan di `user_sessions`); password disimpan sebagai hash **scrypt** ([ADR 0009](06-adr/0009-akun-email-password.md), [ADR 0012](06-adr/0012-ganti-password-mandiri.md)).
 - Webhook Midtrans: verifikasi signature **SHA-512** + handler idempoten ([ADR 0007](06-adr/0007-payment-gateway-midtrans.md)).
 - Prinsip awal yang WAJIB dipenuhi terlepas dari stack:
   - Data pribadi (nomor HP, email) disimpan minimal & terenkripsi.
   - Webhook payment gateway wajib diverifikasi signature-nya sebelum memproses booking.
-  - Rate-limiting pada endpoint registrasi/login & booking.
+  - Rate-limiting pada endpoint registrasi/login & booking — endpoint sensitif memakai tabel `rate_limits` (lintas-instance), endpoint jadwal in-memory ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)).
+  - Tiket hanya bisa dibuka pemilik (sesi cocok `booking.userId`) atau admin bersesi; kode unik saja tidak cukup.
   - Akses admin dilindungi autentikasi khusus (di luar akun pelanggan).
   - Retensi data user bayangan walk-in: **7 hari**, lalu dianonimisasi ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
 
@@ -152,8 +154,8 @@ Web App (Customer / Admin) → API Backend → Database
 | Q4 | Jam operasional tiap hari & variasi harga akhir? | Admin Pemilik |
 | Q5 | Penyedia WhatsApp Business API & anggaran biaya per pesan? → **Ditunda ke v2.0** ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)) | Stakeholder |
 | Q6 | Apakah booking boleh multi-lapangan dalam 1 transaksi? | Product Owner |
-| Q7 | Kapan verifikasi email & reset password mandiri dibutuhkan? (MVP: reset manual via admin) | Product Owner |
-| Q8 | Ambang rate-limit registrasi/login & batas booking aktif per akun? (usulan awal: 5 registrasi/IP/jam, 3 booking aktif) | Tech Lead |
+| Q7 | Kapan verifikasi email & **reset lupa password** mandiri dibutuhkan? (MVP: reset manual via admin; ganti password saat login sudah ada — [ADR 0012](06-adr/0012-ganti-password-mandiri.md)) | Product Owner |
+| Q8 | Ambang rate-limit registrasi/login & batas booking aktif per akun? → **Terjawab sebagian:** 5 registrasi/IP/jam, 10 login/IP/menit, 3 booking aktif; implementasi tabel `rate_limits` ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)) | Tech Lead |
 
 ---
 

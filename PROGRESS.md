@@ -19,18 +19,22 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S6 | Migrasi dijalankan ke Neon | ✅ | 8 tabel + enum terpasang (`npm run db:migrate`) |
 | S7 | Landing page (Bahasa Indonesia) + token brand | ✅ | `src/app/(customer)/page.tsx`, `src/app/globals.css` |
 | S8 | Endpoint `/api/health` (cek koneksi DB) | ✅ | Koneksi DB terverifikasi (SELECT 1 OK) |
-| S9 | Git repo ter-inisialisasi | ✅ | Belum ada commit |
-| S10 | Skema backend lengkap (otp_codes, admins, admin_sessions, kolom expiry/check-in) | ✅ | Migrasi `0001` + `0002` (2026-09-30) |
+| S9 | Git repo ter-inisialisasi | ✅ | Repo aktif; riwayat commit tersedia |
+| S10 | Skema backend lengkap (otp_codes, admins, admin_sessions, kolom expiry/check-in) | ✅ | Migrasi `0001` + `0002` (2026-09-30); `otp_codes` di-drop saat auth pindah ke email+password |
 | S11 | Seed data (6 lapangan + jam 7 hari + admin) + `npm run db:seed` | ✅ | Idempotent, bisa diulang (2026-09-30) |
-| S12 | Lib backend shared (slots, session HMAC, rate-limit, payment/notify mock driver) | ✅ | `src/lib/*.ts` (2026-09-30) |
+| S12 | Lib backend shared (slots, sesi token+hash, rate-limit, payment mock/midtrans) | ✅ | `src/lib/*.ts` (2026-09-30; sesi pemain token acak + SHA-256 sejak 2026-11-12) |
 | S13 | Auth admin backend (scrypt + sesi DB, ganti cookie demo) | ✅ | `POST /api/admin/login|logout`, `GET /api/admin/me` (2026-09-30) |
 | S14 | Index hot-path + connection pool DB | ✅ | Migrasi `0003` (11 index: cron, riwayat, grid, OTP, log) + `max: 5` di `src/db/index.ts` (2026-11-10) |
-| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (3 file, ≤45 request), guard DB test + localhost, `npm run test:api` (2026-11-10) |
+| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (4 file, ±60 request), guard DB test + localhost, `npm run test:api` (2026-11-10; file akun ditambah 2026-11-15) |
 | S16 | Polling jadwal hemat (cache + versi + delta 304) | ✅ | `src/lib/slot-status.ts`, `GET /api/slots/status`, `getDaySchedule` 1 roundtrip, strip minggu 1 request (2026-11-10) |
 | S17 | Auth pemain email + password (ganti OTP) | ✅ | [ADR 0009](docs/06-adr/0009-akun-email-password.md): `/api/auth/register|login|logout|me`, `user_sessions` (token opaque + SHA-256), halaman `/login` + `/daftar`, sesi `padel_session` berbasis `userId` (2026-11-12) |
 | S18 | User bayangan walk-in + cron anonimisasi 7 hari | ✅ | [ADR 0011](docs/06-adr/0011-user-bayangan-walkin.md): `users.isGuest`, `anonymizedAt`, `/api/cron/anonymize`, dedupe guest by HP (2026-11-12) |
 | S19 | Pensiunkan notifikasi WhatsApp/Email | ✅ | [ADR 0010](docs/06-adr/0010-mvp-tanpa-notifikasi.md): panggilan notifikasi dihapus (webhook, cron expire), `/api/cron/reminders` + `/api/admin/notifications` dihapus, migrasi `0004` drop `notification_logs` (2026-11-12) |
 | S20 | Halaman `/daftar` + guard sesi `/booking` & `/riwayat` | ✅ | `/daftar` + guard `goCheckout()` dan 401 API (2026-11-12) |
+| S21 | Ganti password mandiri + halaman `/akun` | ✅ | [ADR 0012](docs/06-adr/0012-ganti-password-mandiri.md): `POST /api/auth/change-password`, `/akun`, sesi lain dicabut (2026-11-15) |
+| S22 | Halaman admin akun pemain + reset password | ✅ | `/admin/users`, `GET /api/admin/users?q=`, `POST /api/admin/users/:id/reset-password` (2026-11-15) |
+| S23 | Rate-limit persisten lintas-instance | ✅ | [ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md): tabel `rate_limits`, migrasi `0005`, `src/lib/rate-limit-db.ts`; endpoint sensitif memakainya (2026-11-15) |
+| S24 | Jadwal cron produksi + CI | ✅ | `vercel.json` (`/api/cron/expire` tiap 5 mnt, `/api/cron/anonymize` harian 03:00 UTC), `.github/workflows/ci.yml` (2026-11-15) |
 
 ## Fitur MVP — Sisi Customer
 
@@ -68,6 +72,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | `/login` | Masuk akun (email + password) | ✅ | UI email + password, tanpa OTP; `safeNextPath()`; lupa password reset via admin ([ADR 0009](docs/06-adr/0009-akun-email-password.md)) |
 | `/daftar` | Daftar akun (nama, email, password, HP) | ✅ | Halaman baru, ak langsung aktif, buat cookie `padel_session` ([ADR 0009](docs/06-adr/0009-akun-email-password.md)) |
 | `/tiket/:kode` | Tiket/bukti digital (wajib login & milik pemilik) | ✅ | Real: `GET /api/tickets/:kode` butuh `padel_session`; pelanggan hanya lihat `booking.userId` miliknya (selain itu 403); admin lewat sesi admin boleh semua; tidak login → 401 diarahkan `/login?next=...` |
+| `/akun` | Pengaturan akun + ganti password | ✅ | Real: `GET /api/auth/me` + `POST /api/auth/change-password`; lupa password tetap via admin ([ADR 0012](docs/06-adr/0012-ganti-password-mandiri.md)) |
 | `/riwayat` | Riwayat booking pemain | ✅ | Real: `GET /api/me/bookings` (+ `/api/courts` sidebar); wajib sesi akun, ada CTA login |
 
 > **Infra halaman (2026-09-28):** `loading.tsx` (customer + panel admin), `error.tsx` (root + panel), `not-found.tsx` global tersedia; metadata SEO per segmen (`(customer)/*`) + judul & `noindex` untuk `/admin/*`. Baca localStorage dipindah ke `useEffect` (hindari hydration mismatch).
@@ -84,9 +89,10 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | `/admin/booking` | Daftar booking + aksi | ✅ | Real: filter/cari + confirm/cancel via API + badge hampir-kedaluwarsa |
 | `/admin/booking/baru` | Form booking manual | ✅ | Real: `POST /api/admin/bookings` (validasi konflik server, 409) |
 | `/admin/lapangan` | Kelola lapangan, harga, jam, maintenance | ✅ | Real: CRUD courts + closures via API |
+| `/admin/users` | Akun pemain + reset password | ✅ | Real: `GET /api/admin/users?q=` (cari nama/email/HP) + `POST /api/admin/users/:id/reset-password`; user bayangan ditandai |
 | `/admin/laporan` | Rekap pendapatan & okupansi | ✅ | Real: `GET /api/admin/reports` (JSON ringkasan + per lapangan) + unduh CSV server-side |
 | `/admin/papan-jadwal` | Papan jadwal publik (mode TV/lobi) | ✅ | Real read-only: `GET /api/admin/schedule` + refresh 15 dtk + nama tersamar; tanpa aksi · di luar sitemap PRD |
-| `/admin/monitoring` | Monitoring web publik + banner siaran | ✅ | Log notifikasi real (20 terbaru via `/api/admin/notifications`); toggle maintenance palsu dinonaktifkan + seluruh panel demo dilabeli jelas · di luar sitemap PRD |
+| `/admin/monitoring` | Monitoring web publik + banner siaran | ✅ | Demo statis (`src/lib/mock-data`) — log notifikasi sudah dihapus karena ADR 0010; panel demo dilabeli jelas · di luar sitemap PRD |
 | `/admin/scanner` | Scanner tiket di gate (kamera/manual) | ✅ | Real: validasi via `GET /api/tickets/:kode` + check-in via `POST /api/admin/checkin`; kamera hanya pratinjau (validasi via input manual); log shift in-memory · di luar sitemap PRD |
 
 ## Sisa Pekerjaan (Belum Dikerjakan)
@@ -99,7 +105,7 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - **User bayangan walk-in:** dedupe by HP, anonimisasi otomatis 7 hari, booking historis tetap ([ADR 0011](docs/06-adr/0011-user-bayangan-walkin.md)).
 
 ### Backend / data (fase berikutnya)
-- Endpoint aktif: `/api/health`, `/api/courts`, `/api/slots`, `/api/auth/*`, `/api/bookings/*`, `/api/me/bookings`, `/api/payments/*`, `/api/webhooks/payment`, `/api/cron/*`, `/api/tickets/*`, `/api/admin/*`. `/api/otp/*`, `/api/cron/reminders`, `/api/admin/notifications` sudah dihapus (v1.1-auth).
+- Endpoint aktif: `/api/health`, `/api/courts`, `/api/slots`, `/api/slots/status`, `/api/auth/*` (termasuk `change-password`), `/api/bookings/*`, `/api/me/bookings`, `/api/payments/*`, `/api/webhooks/payment`, `/api/cron/*`, `/api/tickets/*`, `/api/admin/*` (termasuk `/admin/users`). `/api/otp/*`, `/api/cron/reminders`, `/api/admin/notifications` sudah dihapus (v1.1-auth).
 - ✅ Selesai Batch 1 (2026-09-30): F1 read-path real + F9 penuh + read-model F7 + auth admin backend.
 - ✅ Selesai Batch 2 (2026-09-30): F1–F3 + F8 penuh (OTP mock-driver, transaksi anti-overbooking, walk-in) + wiring `/booking`, `/login`, `/admin/booking/baru`. Docs API v1.0-batch2 (17 endpoint).
 - ✅ Selesai Batch 3 (2026-09-30): F7 + F10 penuh (list/filter/cari, confirm/cancel, overview KPI, tutup-dari-grid, refresh 15 dtk) + wiring `/admin/booking`, `/admin/dashboard`, `/admin/jadwal`. Docs API v1.0-batch3 (19 paths / 21 operasi).
@@ -115,6 +121,15 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji terpisah setelah mig
 - **F10/F11:** cancel walk-in mengembalikan slot; laporan JSON tetap memuat booking walk-in.
 - **Cron:** `/api/cron/expire` tanpa secret 401; `/api/cron/anonymize?secret=…` 200 (ADR 0011). Endpoint pensiunan (`/api/admin/notifications`) membalas 404.
 - **Temuan & perbaikan:** query anonimisasi memakai nama kolom snake_case (`user_id`, `booking_date`, `created_at`) padahal schema Drizzle memakai identifier quoted camelCase → diperbaiki; parameter `Date` diganti ekspresi SQL `now() - interval '7 days'`. Rate-limit registrasi in-memory menumpuk antar-run → helper test mengirim `x-forwarded-for` unik per klien. DB uji lama (`ep-purple-dew…`) sudah mati; diganti database `padelclub_test` di instance Neon yang sama dengan dev (host berbeda tidak dipakai).
+
+## Uji Akun & Operasional (2026-11-15)
+
+Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji terpisah setelah migrasi `0005_powerful_jack_flag` (`rate_limits`). **53 test lulus (4 file).** `lint`, `typecheck`, `build` hijau.
+
+- **Ganti password (ADR 0012):** password lama salah 401; password baru < 8 karakter 400; ganti berhasil 200 + sesi berjalan tetap aktif; password lama tidak bisa login lagi (401); password baru bisa login (200).
+- **Admin akun:** `GET /api/admin/users?q=` menemukan akun; `POST /api/admin/users/:id/reset-password` 200 dan mencabut sesi user (sesi lama `/api/auth/me` → 401); user bayangan ditolak 409 (implementasi).
+- **Rate-limit:** endpoint sensitif memakai `rateLimitDb` (tabel `rate_limits`); endpoint jadwal tetap in-memory; migrasi diterapkan ke DB dev + test.
+- **Cron:** jadwal `vercel.json` belum diuji di Vercel (lokal memakai pemanggilan langsung dengan `CRON_SECRET`).
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 
@@ -132,7 +147,7 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 ### Teknis
 - Gambar eksternal memakai `unoptimized`; `next.config.ts` belum memiliki `remotePatterns`.
 - `EmptyState` dipakai untuk kondisi kosong kartu/tabel; pengecualian disengaja: papan TV (`papan-jadwal`, tema gelap), empty-state kamera scanner (ikon QR), dan not-found tiket (punya dua aksi).
-- Repo: 6 commit; perubahan `docs/03` (rewrite F4 Snap) + revisi 2026-11-12 masih di working tree.
+- Repo: riwayat commit tersedia (`613dc9e` = revisi auth/notifikasi 2026-11-12); perubahan ganti-password, admin users, rate-limit, cron, CI, dan sinkron docs dikerjakan 2026-11-15.
 - `npm run lint` + `typecheck` + `build` hijau; perbaikan `set-state-in-effect` di `/booking` memakai `useSyncExternalStore` (`src/lib/use-snap.ts`).
 
 ### Performa jadwal (`/api/slots`)
@@ -145,13 +160,13 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 
 ### Uji otomatis
 - Jalankan: `cp .env.test.example .env.test` → `npm run db:migrate:test && npm run db:seed:test` → `npm run dev:test` (terminal 1) → `npm run test:api` (terminal 2).
-- Serial (1 worker), ±41 request per run, tanpa load/stress test. Cleanup hanya menghapus baris nomor HP test + closure `TEST-*`.
+- Serial (1 worker), ±60 request per run, tanpa load/stress test. Cleanup hanya menghapus baris nomor HP test + closure `TEST-*`.
 - Guard: tolak `TEST_BASE_URL` non-lokal, tolak DB yang sama dengan `.env`, dan butuh nama DB ber-`test` atau `TEST_DB_CONFIRMED="1"`.
 
 ### Kesiapan produksi (belum selesai)
 - Notifikasi WhatsApp/Email & pengingat F6 ditunda ke v2.0 (PRD Q5) — tidak ada integrasi nyata di MVP.
-- Cron F4 (expire) & cron anonimisasi walk-in butuh scheduler eksternal (belum ada config di repo).
-- Verifikasi email & reset password mandiri belum ada (PRD Q7); reset sementara via admin.
+- Cron F4 (expire) & cron anonimisasi walk-in dijadwalkan `vercel.json` ([ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md)); host non-Vercel perlu scheduler eksternal dengan jadwal sama.
+- Verifikasi email & **reset lupa password** mandiri belum ada (PRD Q7); reset via admin `/admin/users`, ganti password saat login lewat `/akun` ([ADR 0012](docs/06-adr/0012-ganti-password-mandiri.md)).
 - Kredensial Midtrans: isi hanya di `.env`; key yang pernah tertulis di `.env.example` wajib di-rotate di dashboard Midtrans.
 - Alur bayar Midtrans sandbox belum diuji end-to-end (butuh URL publik + key valid).
 

@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { bookings } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimitDb } from '@/lib/rate-limit-db';
 
 /**
  * Check-in oleh admin (F5): menandai pelanggan "sudah check-in" dari tiket.
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return jsonError('Unauthorized', 401);
 
-  const rl = rateLimit(`checkin:${admin.id}`, 30, 60_000);
+  const rl = await rateLimitDb(`checkin:${admin.id}`, 30, 60_000);
   if (!rl.allowed) return jsonError('Terlalu banyak percobaan, coba lagi sebentar', 429);
 
   const body = (await request.json().catch(() => null)) as {

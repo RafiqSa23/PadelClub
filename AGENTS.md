@@ -42,6 +42,12 @@ Padel Court Booking — product specs in `docs/` (Bahasa Indonesia) plus a Next.
 - Cek tiket (`GET /api/tickets/[kode]`): sekarang wajib login (`padel_session`). Pelanggan hanya bisa melihat tiket miliknya sendiri (`booking.userId` cocok dengan `user.id` sesi); selain itu balas 403. Admin (scanner gate) melalui sesi admin boleh melihat semua tiket. Tidak login → 401.
 - Halaman `/tiket/[kode]`: 401 diarahkan ke `/login?next=/tiket/[kode]`; 403 menampilkan "Anda bukan pemilik tiket ini". Salinan di `/tiket` dan `/tiket/[kode]` diperbaharui (tidak lagi "buka tanpa login").
 - Akun dummy: user dibuat lewat `/daftar` (email + password); admin via seed (`admin` / `admin123`, lihat `SEED_ADMIN_USER`/`SEED_ADMIN_PASSWORD` di `.env.test`).
+- Ganti password mandiri: `POST /api/auth/change-password` (perlu `padel_session`, verifikasi password lama, minimal 8 karakter) + halaman `/akun`; sesi perangkat lain dicabut, sesi berjalan tetap ([ADR 0012](docs/06-adr/0012-ganti-password-mandiri.md)). Lupa password tetap lewat admin.
+- Admin akun pemain: `/admin/users` (cari via `GET /api/admin/users?q=`) + `POST /api/admin/users/[id]/reset-password` (mengakhiri semua sesi user). User bayangan (`isGuest`) ditolak 409.
+- Rate-limit endpoint sensitif (auth, booking, check-in) memakai tabel Postgres `rate_limits` via `src/lib/rate-limit-db.ts`; endpoint jadwal (`/api/slots`, `/api/slots/status`) tetap in-memory `src/lib/rate-limit.ts` ([ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md)). Migrasi `0005` (`rate_limits`); kolom quoted camelCase (`"windowStart"`).
+- Cron produksi di `vercel.json`: `/api/cron/expire` tiap 5 menit, `/api/cron/anonymize` harian 03:00 UTC (`CRON_SECRET` wajib di produksi). `/api/cron/expire` juga menjalankan `cleanupRateLimits()`.
+- CI: `.github/workflows/ci.yml` — job `quality` (lint + typecheck + build) selalu jalan; job `api-tests` aktif bila repo variable `API_TESTS_ENABLED=1` dan secret `TEST_DATABASE_URL` diisi.
+- Sesi pemain memakai token acak 32 byte; DB menyimpan **hash SHA-256** (`user_sessions.tokenHash`), bukan HMAC. `SESSION_SECRET` tidak dipakai dan sudah dihapus dari template env.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

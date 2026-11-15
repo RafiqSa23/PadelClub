@@ -65,6 +65,18 @@ export const userSessions = pgTable(
   (t) => [index('user_sessions_expires_idx').on(t.expiresAt)],
 );
 
+// Rate-limit fixed-window lintas-instance (ADR 0012): dipakai endpoint sensitif
+// (auth, booking, check-in) agar batas tetap berlaku di beberapa instance.
+export const rateLimits = pgTable(
+  'rate_limits',
+  {
+    key: text().primaryKey(),
+    count: integer().notNull().default(0),
+    windowStart: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('rate_limits_window_idx').on(t.windowStart)],
+);
+
 export const courts = pgTable('courts', {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   name: text().notNull(),

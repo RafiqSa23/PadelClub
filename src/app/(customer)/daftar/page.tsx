@@ -108,7 +108,7 @@ export default function DaftarPage() {
               </Link>
             </p>
             <div className="border-t border-line/80 pt-4 text-center">
-              <ButtonLink href="/tiket" variant="ghost" size="sm">Buka tiket tanpa login</ButtonLink>
+              <ButtonLink href="/" variant="ghost" size="sm">Kembali ke beranda</ButtonLink>
             </div>
           </form>
         </Card>

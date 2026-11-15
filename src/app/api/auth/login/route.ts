@@ -3,14 +3,14 @@ import { db } from '@/db';
 import { users } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { verifyPassword } from '@/lib/password';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimitDb } from '@/lib/rate-limit-db';
 import { customerCookieValue } from '@/lib/session';
 import { createUserSession } from '@/lib/user-auth';
 
 /** Login akun pemain (F3, ADR 0009). Pesan error tidak membocorkan mana yang salah. */
 export async function POST(request: Request) {
   const ip = request.headers.get('x-forwarded-for') ?? 'local';
-  const rl = rateLimit(`auth-login:${ip}`, 10, 60_000);
+  const rl = await rateLimitDb(`auth-login:${ip}`, 10, 60_000);
   if (!rl.allowed) return jsonError('Terlalu banyak percobaan, coba lagi sebentar', 429);
 
   const body = (await request.json().catch(() => null)) as {

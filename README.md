@@ -4,13 +4,12 @@ Online booking for padel courts: instant slot search, multi-hour cart, email + p
 accounts, Snap payment with 15-minute expiry, digital tickets with admin check-in, and
 admin reports. No WhatsApp/Email notifications in the MVP (ADR 0010). Built with
 **Next.js 16 + Drizzle ORM + Neon PostgreSQL**. Backend features **F1–F11** are
-implemented; F3 is being migrated to email + password accounts (ADR 0009) and F6 was
-cancelled.
+implemented with email + password accounts (ADR 0009); F6 was cancelled (ADR 0010).
 
 > Product docs (Bahasa Indonesia) live in [`docs/`](docs/) — start at
 > [`docs/README.md`](docs/README.md). Implementation status: [`PROGRESS.md`](PROGRESS.md).
 > API reference: [`docs/07-api-backend.md`](docs/07-api-backend.md) (+
-> [`07-api-backend.openapi.yaml`](docs/07-api-backend.openapi.yaml), 28 paths).
+> [`07-api-backend.openapi.yaml`](docs/07-api-backend.openapi.yaml), 33 paths).
 
 ## Quick Start
 
@@ -35,7 +34,7 @@ Seed admin: `admin / admin123` — change the password after first login
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:generate` / `db:migrate` / `db:studio` | Drizzle Kit |
 | `npm run db:seed` | Seed courts, hours, admin (`tsx src/db/seed.ts`) |
-| `npm test` / `npm run test:api` | HTTP API tests (serial, ≤45 requests) |
+| `npm test` / `npm run test:api` | HTTP API tests (serial, ±60 requests) |
 | `npm run dev:test` | Dev server on port 3100 against the **test** DB |
 | `npm run db:migrate:test` / `db:seed:test` | Migrate/seed the test DB (`.env.test`) |
 
@@ -54,7 +53,8 @@ Seed admin: `admin / admin123` — change the password after first login
 ## Customer Flow
 
 `/booking` (slot grid → review → account login/register → Snap popup) → `/tiket/:kode`
-(no login) → `/riwayat` (account session). Payment defaults to a **mock driver**
+(login required; owner or admin only) → `/riwayat` (account session). Payment defaults
+to a **mock driver**
 (`PAYMENT_DRIVER="mock"`, payload `MOCK-QRIS:ORD-<code>:<amount>`); switch to Midtrans
 Snap popup (ADR 0008) by filling `MIDTRANS_*` in `.env`. The UI is unchanged either way.
 
@@ -72,7 +72,7 @@ while the tab is hidden.
 ## Testing
 
 HTTP tests hit a running server — they never start one themselves and never run
-in parallel (1 worker, sequential files, ≤45 requests per run) so dev/prod servers
+in parallel (1 worker, sequential files, ±60 requests per run) so dev/prod servers
 are not hammered.
 
 ```bash
@@ -93,19 +93,22 @@ and closures labelled `TEST-*`. No load/stress tests live in this repo.
 
 | File | Covers |
 |---|---|
-| `tests/api/01-customer-flow.test.ts` | F1–F5: slots, delta 304, OTP, booking, charge, webhook, ticket, history |
+| `tests/api/01-customer-flow.test.ts` | F1–F5: slots, delta 304, register/login, booking, charge, webhook, ticket, history |
 | `tests/api/02-admin-flow.test.ts` | F7–F11: login, dashboard, walk-in, check-in, closures, reports |
-| `tests/api/03-guards.test.ts` | Auth guards (401), 404, input validation (400) |
+| `tests/api/03-guards.test.ts` | Auth guards (401/403), 404, input validation (400) |
+| `tests/api/04-account.test.ts` | ADR 0012: change-password (wrong/old/new), admin reset-password + session revocation |
 
 ## Scheduled Jobs
 
 Cron endpoints require `CRON_SECRET` (`x-cron-secret` header, `Bearer` token,
-or `?secret=` query):
+or `?secret=` query). Schedules are declared in [`vercel.json`](vercel.json)
+([ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md)); on other hosts register
+the same schedule in an external scheduler.
 
 | Endpoint | Schedule | Purpose |
 |---|---|---|
-| `GET /api/cron/expire` | every minute | Expire `menunggu_pembayaran` older than 15 min (ADR 0006) |
-| `GET /api/cron/anonymize` | daily | Anonymize walk-in guest users idle > 7 days (ADR 0011) |
+| `GET /api/cron/expire` | every 5 minutes | Expire `menunggu_pembayaran` older than 15 min (ADR 0006); also prunes `rate_limits` |
+| `GET /api/cron/anonymize` | daily 03:00 UTC | Anonymize walk-in guest users idle > 7 days (ADR 0011) |
 
 ## Environment
 
@@ -114,9 +117,8 @@ See [`.env.example`](.env.example). Never commit `.env` (gitignored).
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | Neon PostgreSQL connection string |
-| `SESSION_SECRET` | HMAC secret for customer sessions (min 32 chars, rotate in prod) |
 | `PAYMENT_DRIVER` | `mock` (default, no credentials) / `midtrans` |
-| `CRON_SECRET` | Auth for `/api/cron/*` |
+| `CRON_SECRET` | Auth for `/api/cron/*` (required in production) |
 | `SEED_ADMIN_USER` / `SEED_ADMIN_PASSWORD` | Seed admin credentials |
 
 ## Learn More

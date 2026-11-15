@@ -2,6 +2,7 @@ import { and, eq, lt } from 'drizzle-orm';
 import { db } from '@/db';
 import { bookings, payments } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
+import { cleanupRateLimits } from '@/lib/rate-limit-db';
 import { bumpSlotsVersion } from '@/lib/slot-status';
 
 function isAuthorized(request: Request): boolean {
@@ -53,6 +54,9 @@ export async function GET(request: Request) {
 
   // Slot yang dibebaskan mengubah jadwal — naikkan versi per tanggal tersentuh.
   for (const date of touchedDates) bumpSlotsVersion(date);
+
+  // Rumah tangga: hapus baris rate-limit yang sudah basi (ADR 0012).
+  await cleanupRateLimits();
 
   return jsonOk({ expiredCount: codes.length, codes });
 }

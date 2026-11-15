@@ -180,7 +180,7 @@ describe("alur pelanggan (F1–F5)", () => {
     expect(res.body.already).toBe(true);
   });
 
-  it("tiket publik memuat status lunas + jam (F5)", async () => {
+  it("tiket pemilik memuat status lunas + jam (F5)", async () => {
     const res = await client.get<{
       ticket: { code: string; status: string; paymentStatus: string; hours: number[] };
     }>(`/api/tickets/${bookingCode}`);

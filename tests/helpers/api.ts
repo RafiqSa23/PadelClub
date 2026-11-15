@@ -20,7 +20,7 @@ export const TEST_DATE = isoDate(45);
 export const TEST_DATE_CLOSURE = isoDate(46);
 
 /** Batas request per run — mencegah test jadi beban server. */
-export const REQUEST_BUDGET = 45;
+export const REQUEST_BUDGET = 60;
 
 export interface ApiResponse<T = Record<string, unknown>> {
   status: number;

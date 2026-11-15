@@ -23,6 +23,7 @@ const SECONDARY_NAV = [
   { href: "/admin/booking", label: "Booking", icon: "confirmation_number" },
   { href: "/admin/booking/baru", label: "Booking Manual", icon: "add_circle" },
   { href: "/admin/lapangan", label: "Lapangan", icon: "settings" },
+  { href: "/admin/users", label: "Akun Pemain", icon: "manage_accounts" },
   { href: "/admin/laporan", label: "Laporan", icon: "bar_chart" },
 ];
 

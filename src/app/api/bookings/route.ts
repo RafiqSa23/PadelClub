@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { courts } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { ConflictError, countActiveBookings, createBookingTx } from '@/lib/bookings';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimitDb } from '@/lib/rate-limit-db';
 import { isValidDateString } from '@/lib/slots';
 import { getCurrentUser } from '@/lib/user-auth';
 
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   const user = await getCurrentUser();
   if (!user) return jsonError('Masuk ke akun terlebih dahulu', 401);
 
-  const rl = rateLimit(`bookings:${user.id}`, 10, 60_000);
+  const rl = await rateLimitDb(`bookings:${user.id}`, 10, 60_000);
   if (!rl.allowed) return jsonError('Terlalu banyak percobaan, coba lagi sebentar', 429);
 
   const body = (await request.json().catch(() => null)) as {

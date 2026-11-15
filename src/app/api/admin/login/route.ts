@@ -3,11 +3,11 @@ import { db } from '@/db';
 import { admins } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { adminCookieValue, createAdminSession, verifyAdminPassword } from '@/lib/admin-auth';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimitDb } from '@/lib/rate-limit-db';
 
 export async function POST(request: Request) {
   const ip = request.headers.get('x-forwarded-for') ?? 'local';
-  const rl = rateLimit(`admin-login:${ip}`, 10, 60_000);
+  const rl = await rateLimitDb(`admin-login:${ip}`, 10, 60_000);
   if (!rl.allowed) {
     return jsonError('Terlalu banyak percobaan, coba lagi sebentar', 429);
   }

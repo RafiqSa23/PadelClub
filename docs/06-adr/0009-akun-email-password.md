@@ -13,12 +13,12 @@ Kanal pengiriman OTP juga bergantung pada penyedia notifikasi yang belum dipilih
 Akun pemain memakai **email + password**.
 
 - **Registrasi:** email (unik), password (minimal 8 karakter), nama, nomor HP. Tidak ada verifikasi email maupun OTP.
-- **Login:** email + password; sesi disimpan di cookie `padel_session` bertanda tangan (HMAC-SHA256) yang membawa `userId`.
+- **Login:** email + password; sesi disimpan di cookie `padel_session` berisi token acak 32 byte (hash **SHA-256** di tabel `user_sessions`, membawa `userId` lewat baris sesi).
 - **Checkout web wajib sesi:** `/booking` tanpa sesi diarahkan ke `/login`. Booking yang dibuat lewat website selalu terikat ke akun.
 - **Password:** disimpan sebagai hash **scrypt** (pola sama dengan auth admin), tidak pernah dikembalikan API.
-- **Reset password:** tidak tersedia mandiri di MVP (butuh pengiriman email). Reset dilakukan admin lewat endpoint khusus.
+- **Reset password:** **lupa password** tidak tersedia mandiri di MVP (butuh pengiriman email); reset dilakukan admin. Pemilik sesi aktif dapat **mengganti** password sendiri ([ADR 0012](0012-ganti-password-mandiri.md)).
 - **Walk-in:** tidak memakai akun asli — admin membuat **user bayangan** ([ADR 0011](0011-user-bayangan-walkin.md)).
-- **Mitigasi penyalahgunaan (tanpa OTP):** rate-limit registrasi & login per IP, maksimum booking aktif per akun, admin dapat memblokir akun, seluruh percobaan login dicatat.
+- **Mitigasi penyalahgunaan (tanpa OTP):** rate-limit registrasi & login per IP (tabel `rate_limits`, lintas-instance — [ADR 0013](0013-rate-limit-cron-produksi.md)), maksimum booking aktif per akun, admin dapat mereset password akun.
 
 ## Alasan
 - **Permintaan Product Owner:** pemain punya akun permanen; booking web tersimpan di riwayat akun.
@@ -46,3 +46,5 @@ Akun pemain memakai **email + password**.
 - [Spesifikasi Fitur F3 — Checkout](../03-spesifikasi-fitur.md#f3--checkout-akun-email--password)
 - [Spesifikasi Fitur F8 — Booking Manual](../03-spesifikasi-fitur.md#f8--booking-manual-walk-in--telepon)
 - [ADR 0011 — User Bayangan Walk-in](0011-user-bayangan-walkin.md)
+- [ADR 0012 — Ganti Password Mandiri](0012-ganti-password-mandiri.md)
+- [ADR 0013 — Rate-limit & Cron Produksi](0013-rate-limit-cron-produksi.md)

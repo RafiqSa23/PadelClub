@@ -2,7 +2,7 @@
 
 > Referensi teknis untuk seluruh endpoint backend (`src/app/api/`).
 > Spesifikasi mesin-terbaca: [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) (impor ke Postman / Swagger UI).
-> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.1-auth` (revisi scope 2026-11-12).**
+> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.2-akun` (revisi akun + operasional 2026-11-15).**
 > Source of truth implementasi tetap kode di `src/app/api/` + skema `src/db/schema.ts`.
 
 ## Isi Dokumen
@@ -20,6 +20,7 @@
 - [7. Endpoint Admin — Jadwal & Penutupan](#7-endpoint-admin--jadwal--penutupan)
 - [7b. Endpoint Admin — Monitoring](#7b-endpoint-admin--monitoring)
 - [7c. Endpoint Admin — Cron Anonimisasi (Notifikasi Dipensiunkan)](#7c-endpoint-admin--cron-anonimisasi-notifikasi-dipensiunkan)
+- [7d. Endpoint Admin — Akun Pemain](#7d-endpoint-admin--akun-pemain)
 - [8. Endpoint Admin — Lapangan & Booking Manual](#8-endpoint-admin--lapangan--booking-manual)
 - [8b. Endpoint Admin — Laporan](#8b-endpoint-admin--laporan)
 - [9. Rencana Batch Berikutnya](#9-rencana-batch-berikutnya)
@@ -43,7 +44,7 @@
 | Sesi | Cookie | Cara dapat | Masa berlaku | Dipakai oleh |
 |---|---|---|---|---|
 | Admin | `padelclub_admin` (HttpOnly, `SameSite=Lax`) | `POST /api/admin/login` | 12 jam (tabel `admin_sessions`) | Seluruh `POST/PATCH/DELETE /api/admin/*` dan `GET /api/admin/schedule`, `/api/admin/me` |
-| Customer | `padel_session` (HMAC-SHA256, tanpa dep eksternal) | `POST /api/auth/login` / `POST /api/auth/register` | 30 hari | `POST /api/bookings`, `GET /api/me/bookings`, `POST /api/auth/logout`, `GET /api/auth/me` |
+| Customer | `padel_session` (token acak 32 byte; **hash SHA-256** tersimpan di `user_sessions`) | `POST /api/auth/login` / `POST /api/auth/register` | 30 hari | `POST /api/bookings`, `GET /api/me/bookings`, `POST /api/auth/logout`, `GET /api/auth/me`, `POST /api/auth/change-password`, `GET /api/tickets/:kode` (pemilik) |
 | Cron internal | Header `x-cron-secret` / `Authorization: Bearer` / query `?secret=` via env `CRON_SECRET` | — | — | `GET /api/cron/expire`, `GET /api/cron/anonymize` |
 
 Catatan:
@@ -87,9 +88,11 @@ Gagal:
 | `POST /api/admin/login` | 10 percobaan / IP | 60 detik |
 | `POST /api/auth/register` | 5 percobaan / IP | 60 menit |
 | `POST /api/auth/login` | 10 percobaan / IP | 60 detik |
+| `POST /api/auth/change-password` | 10 percobaan / user | 60 detik |
 | `POST /api/bookings` | 10/mnt per user + maks 3 booking aktif per akun (PRD Q8) | 60 detik |
+| `POST /api/admin/checkin` | 30 percobaan / admin | 60 detik |
 
-Implementasi: `src/lib/rate-limit.ts` (in-memory per instance); batas booking aktif diperiksa di transaksi booking.
+Implementasi: endpoint sensitif (auth, booking, check-in) memakai `src/lib/rate-limit-db.ts` — tabel Postgres `rate_limits`, fixed-window, konsisten lintas-instance ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)). Endpoint jadwal (`/api/slots`, `/api/slots/status`) tetap memakai `src/lib/rate-limit.ts` (in-memory) karena di-polling sering. Batas booking aktif diperiksa di transaksi booking. Baris `rate_limits` lama dibersihkan oleh cron kedaluwarsa.
 
 ---
 
@@ -164,11 +167,24 @@ Status slot: `kosong` | `menunggu_pembayaran` | `terkonfirmasi` | `tutup`. Slot 
 |---|---|---|
 | Format tanggal salah | 400 | `Parameter date wajib format YYYY-MM-DD` |
 
+### 5.4 `GET /api/slots/status?date=&v=` — polling delta jadwal
+
+Klien mengirim versi terakhir (`v`) yang dipegang; server membalas **304 tanpa query DB** bila tidak ada perubahan. Bila ada perubahan, balasan `{ ok, v, full: false, slots: [...] }` berisi patch slot; `full: true` mengirim `schedule` penuh (mis. server baru restart / klien tertinggal). Dipakai polling 10 detik di `/booking` dan `/admin/jadwal`.
+
+```bash
+curl "http://localhost:3100/api/slots/status?date=2026-10-05&v=3"
+```
+
+| Error | Kode | Contoh `message` |
+|---|---|---|
+| Format tanggal salah | 400 | `Parameter date wajib format YYYY-MM-DD` |
+| Terlalu sering | 429 | `Terlalu banyak permintaan jadwal, coba lagi sebentar` |
+
 ---
 
 ## 5a. Endpoint Pelanggan — Auth (Akun Email + Password)
 
-> F3 — Checkout dengan akun ([ADR 0009](06-adr/0009-akun-email-password.md)). **OTP dihapus** dari MVP. Password di-hash `scrypt`; sesi `padel_session` membawa `userId`. Tidak ada verifikasi email; reset password hanya oleh admin.
+> F3 — Checkout dengan akun ([ADR 0009](06-adr/0009-akun-email-password.md)). **OTP dihapus** dari MVP. Password di-hash `scrypt`; sesi `padel_session` membawa `userId`. Tidak ada verifikasi email; **reset lupa password** hanya oleh admin, sedangkan **ganti password saat login** tersedia mandiri ([ADR 0012](06-adr/0012-ganti-password-mandiri.md)).
 
 ### 5a.1 `POST /api/auth/register` — daftar akun
 
@@ -224,9 +240,31 @@ Menghapus sesi aktif (`user_sessions`) dan cookie `padel_session`.
 
 Tanpa sesi → `401`.
 
-### 5a.5 Reset password oleh admin
+### 5a.5 `POST /api/auth/change-password` — ganti password saat login
 
-`POST /api/admin/users/:id/reset-password` (sesi admin) — menetapkan password baru sementara dan mengakhiri seluruh sesi user tersebut. Detail menyusul saat implementasi; PRD Q7 mencatat reset mandiri belum ada.
+Perlu sesi `padel_session` ([ADR 0012](06-adr/0012-ganti-password-mandiri.md)). Body: `currentPassword`, `newPassword` (minimal 8 karakter). Password lama salah → `401`. Bila berhasil, password di-hash ulang dan **sesi perangkat lain dicabut**; sesi perangkat ini tetap aktif.
+
+```bash
+curl -X POST http://localhost:3100/api/auth/change-password \
+  -H 'Content-Type: application/json' -b cust.txt \
+  -d '{"currentPassword":"rahasia123","newPassword":"rahasiaBaru456"}'
+```
+
+```json
+{ "ok": true, "changed": true }
+```
+
+| Error | Kode | Contoh `message` |
+|---|---|---|
+| Tanpa sesi | 401 | `Masuk ke akun terlebih dahulu` |
+| Field kurang | 400 | `Password lama dan password baru wajib diisi` |
+| Password baru pendek | 400 | `Password baru minimal 8 karakter` |
+| Password lama salah | 401 | `Password lama salah` |
+| Terlalu sering | 429 | `Terlalu banyak percobaan, coba lagi sebentar` |
+
+### 5a.6 Reset password oleh admin
+
+`POST /api/admin/users/:id/reset-password` (sesi admin) — menetapkan password baru sementara dan mengakhiri seluruh sesi user tersebut. Halaman admin `/admin/users` memakai endpoint ini; daftar akun lewat `GET /api/admin/users?q=`. Reset lupa password mandiri belum ada (PRD Q7).
 
 ---
 
@@ -431,7 +469,7 @@ curl -X POST http://localhost:3100/api/webhooks/payment \
 
 ### 5c.4 `GET /api/cron/expire` — kedaluwarsakan booking > 15 mnt
 
-Perlu `CRON_SECRET` (header `x-cron-secret`, `Authorization: Bearer`, atau query `?secret=`). Dijadwalkan tiap menit via cron eksternal (Vercel Cron / cron-job.org). Tiap booking kedaluwarsa: `menunggu_pembayaran → dibatalkan`, payment `pending → expired`, log `kadaluarsa` — slot kembali `kosong` otomatis.
+Perlu `CRON_SECRET` (header `x-cron-secret`, `Authorization: Bearer`, atau query `?secret=`). Dijadwalkan oleh `vercel.json` **setiap 5 menit** (`*/5 * * * *`); bila deploy non-Vercel, daftarkan jadwal yang sama di scheduler eksternal ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)). Tiap booking kedaluwarsa: `menunggu_pembayaran → dibatalkan`, payment `pending → expired`, log `kadaluarsa` — slot kembali `kosong` otomatis. Route ini juga membersihkan baris `rate_limits` yang sudah basi.
 
 ```bash
 curl -H 'x-cron-secret: dev-cron-secret-lokal' http://localhost:3100/api/cron/expire
@@ -449,14 +487,16 @@ curl -H 'x-cron-secret: dev-cron-secret-lokal' http://localhost:3100/api/cron/ex
 
 ## 5d. Endpoint Tiket & Check-in
 
-> F5 — Tiket/bukti booking digital. Tiket dibuka tanpa login bermodal kode unik; check-in hanya oleh admin bersesi (halaman publik tidak boleh men-toggle sendiri).
+> F5 — Tiket/bukti booking digital. Tiket **wajib login**: pemain hanya boleh membuka tiket miliknya sendiri (kode unik saja tidak cukup), admin bersesi boleh membuka semua tiket untuk scanner gate. Check-in hanya oleh admin bersesi (halaman tiket tidak boleh men-toggle sendiri).
 
-### 5d.1 `GET /api/tickets/:kode` — tiket publik
+### 5d.1 `GET /api/tickets/:kode` — tiket (wajib login/pemilik)
 
 Memuat seluruh field tiket (AC F5: kode, nama & HP, lapangan, tanggal, jam, durasi implisit dari `hours`, total, status) + `paymentStatus`/`paidAt` + `checkedInAt`/`checkedInBy` + `closureNotice` (pemberitahuan bila jadwal ketiban penutupan/Tutup; Batal ditandai via `status: dibatalkan`).
 
+**Akses:** sesi `padel_session` milik `booking.userId` **atau** sesi admin. Tanpa sesi → `401`; sesi pemain lain → `403`.
+
 ```bash
-curl http://localhost:3100/api/tickets/PD-YTZE3G
+curl http://localhost:3100/api/tickets/PD-YTZE3G -b cust.txt
 ```
 
 ```json
@@ -487,7 +527,11 @@ curl http://localhost:3100/api/tickets/PD-YTZE3G
 
 | Error | Kode | Contoh `message` |
 |---|---|---|
+| Tanpa sesi | 401 | `Masuk ke akun terlebih dahulu` |
+| Bukan pemilik | 403 | `Anda bukan pemilik tiket ini` |
 | Tidak ada | 404 | `Tiket tidak ditemukan` |
+
+Halaman `/tiket/[kode]` mengarahkan `401` ke `/login?next=/tiket/[kode]` dan menampilkan pesan khusus untuk `403`.
 
 ### 5d.2 `POST /api/admin/checkin` — check-in oleh admin
 
@@ -751,7 +795,7 @@ curl "http://localhost:3100/api/admin/overview?date=2026-10-08" -b cookies.txt
 
 ### 7c.1 `GET /api/cron/anonymize` — anonimisasi user bayangan > 7 hari
 
-Perlu `CRON_SECRET` (pola sama dengan `/api/cron/expire`). Memproses `users` dengan `is_guest = true` yang tidak punya booking aktif dan booking terakhirnya lebih dari 7 hari lalu: nama → `"Tamu"`, `phone`/`email` → `NULL`, `anonymized_at` diisi. Baris user & booking **tidak dihapus** ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
+Perlu `CRON_SECRET` (pola sama dengan `/api/cron/expire`). Dijadwalkan `vercel.json` **harian 03:00 UTC** (`0 3 * * *`). Memproses `users` dengan `is_guest = true` yang tidak punya booking aktif dan booking terakhirnya lebih dari 7 hari lalu: nama → `"Tamu"`, `phone`/`email` → `NULL`, `anonymized_at` diisi. Baris user & booking **tidak dihapus** ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
 
 ```bash
 curl -H 'x-cron-secret: dev-cron-secret-lokal' http://localhost:3100/api/cron/anonymize
@@ -764,6 +808,63 @@ curl -H 'x-cron-secret: dev-cron-secret-lokal' http://localhost:3100/api/cron/an
 | Error | Kode | Contoh `message` |
 |---|---|---|
 | Tanpa/salah secret | 401 | `Unauthorized` |
+
+---
+
+## 7d. Endpoint Admin — Akun Pemain
+
+> Dipakai halaman `/admin/users` ([ADR 0012](06-adr/0012-ganti-password-mandiri.md)) untuk mencari akun pemain dan mereset password saat pemain lupa. Reset **lupa password** tetap lewat admin; reset mandiri menunggu kanal email (PRD Q7).
+
+### 7d.1 `GET /api/admin/users?q=` — daftar/cari akun
+
+**Perlu sesi admin.** `q` opsional (cocokkan nama/email/nomor HP, case-insensitive). Maksimal 25 hasil, urut terbaru.
+
+```bash
+curl "http://localhost:3100/api/admin/users?q=raka" -b cookies.txt
+```
+
+```json
+{
+  "ok": true,
+  "users": [
+    {
+      "id": 1,
+      "name": "Raka Pratama",
+      "email": "raka@example.com",
+      "phone": "6281234567890",
+      "isGuest": false,
+      "anonymizedAt": null,
+      "createdAt": "2026-11-12T09:10:00.000Z"
+    }
+  ]
+}
+```
+
+| Error | Kode | Contoh `message` |
+|---|---|---|
+| Tanpa sesi | 401 | `Unauthorized` |
+
+### 7d.2 `POST /api/admin/users/:id/reset-password` — reset password oleh admin
+
+**Perlu sesi admin.** Body: `password` (minimal 8 karakter). Password di-hash `scrypt` baru dan **seluruh sesi user tersebut diakhiri**. User bayangan walk-in tidak punya password → `409`.
+
+```bash
+curl -X POST http://localhost:3100/api/admin/users/1/reset-password \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{"password":"sementara123"}'
+```
+
+```json
+{ "ok": true, "userId": 1 }
+```
+
+| Error | Kode | Contoh `message` |
+|---|---|---|
+| Tanpa sesi | 401 | `Unauthorized` |
+| ID invalid | 400 | `ID user tidak valid` |
+| Password pendek | 400 | `Password minimal 8 karakter` |
+| Tidak ada | 404 | `User tidak ditemukan` |
+| User bayangan | 409 | `User bayangan tidak punya password` |
 
 ---
 
@@ -902,9 +1003,9 @@ curl "http://localhost:3100/api/admin/reports?from=2026-09-01&to=2026-09-30&form
 
 > Seluruh batch 1–7 selesai. Bagian ini menjadi riwayat pengerjaan (beserta path di `07-api-backend.openapi.yaml`). Struktur section tidak berubah.
 
-### 9.1 ✅ Batch 2 — Booking + OTP + Walk-in (F2, F3, F8) → versi `1.0-batch2` (selesai 2026-09-30)
+### 9.1 ✅ Batch 2 — Booking + Auth Akun + Walk-in (F2, F3, F8) → versi `1.0-batch2` (selesai 2026-09-30; auth direvisi `1.1-auth`)
 
-Terdokumentasi penuh di §5a, §5b, dan §8.3 + OpenAPI: `POST /api/otp/request|verify`, `POST /api/bookings`, `GET /api/bookings/:code`, `GET /api/me/bookings`, `POST /api/admin/bookings`.
+Terdokumentasi penuh di §5a, §5b, dan §8.3 + OpenAPI: ~~`POST /api/otp/request|verify`~~ (dipensiunkan, diganti `POST /api/auth/register|login`), `POST /api/bookings`, `GET /api/bookings/:code`, `GET /api/me/bookings`, `POST /api/admin/bookings`.
 
 ### 9.2 ✅ Batch 3 — Admin monitoring (F7 penuh, F10) → versi `1.0-batch3` (selesai 2026-09-30)
 
@@ -916,7 +1017,7 @@ Terdokumentasi penuh di §5c + OpenAPI: `POST /api/payments/:code/charge` (idemp
 
 ### 9.4 ✅ Batch 5 — Tiket (F5) → versi `1.0-batch5` (selesai 2026-09-30)
 
-Terdokumentasi penuh di §5d + OpenAPI: `GET /api/tickets/:kode` (tiket publik + notice Batal/Tutup + status check-in), `POST /api/admin/checkin` (admin only, idempoten). Wiring: `/tiket/:kode` data real (toggle check-in publik dihapus — hanya tampil status), `/riwayat` via `GET /api/me/bookings` (+ `/api/courts` untuk sidebar), modal `/admin/booking` dapat check-in + tampil status (list ikut kembalikan `checkedInAt`).
+Terdokumentasi penuh di §5d + OpenAPI: `GET /api/tickets/:kode` (sejak `1.2-akun` wajib login + pemilik/admin + notice Batal/Tutup + status check-in), `POST /api/admin/checkin` (admin only, idempoten). Wiring: `/tiket/:kode` data real (toggle check-in publik dihapus — hanya tampil status), `/riwayat` via `GET /api/me/bookings` (+ `/api/courts` untuk sidebar), modal `/admin/booking` dapat check-in + tampil status (list ikut kembalikan `checkedInAt`).
 
 ### 9.5 ❌ Batch 6 — Notifikasi (F6) → versi `1.0-batch6` (dipensiunkan 2026-11-12)
 
@@ -925,6 +1026,10 @@ Dibatalkan dari MVP ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)): `GET /api
 ### 9.6 ✅ Batch 7 — Laporan (F11) → versi `1.0-batch7` (selesai 2026-09-30)
 
 Terdokumentasi penuh di §8b + OpenAPI: `GET /api/admin/reports` (JSON: omzet, total, batal, okupansi per lapangan) + `?format=csv` (ekspor server-side). Wiring: `/admin/laporan` data real + unduh CSV via anchor.
+
+### 9.7 ✅ Akun + Operasional → versi `1.2-akun` (selesai 2026-11-15)
+
+Ganti password mandiri (§5a.5, `/akun`, [ADR 0012](06-adr/0012-ganti-password-mandiri.md)); reset password admin (§7d, `/admin/users`); tiket wajib login/pemilik (§5d.1); rate-limit persisten `rate_limits` + jadwal Vercel Cron (§4, §5c.4, §7c.1, [ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)); `GET /api/slots/status` didokumentasikan di OpenAPI.
 
 ---
 
@@ -940,8 +1045,9 @@ Terdokumentasi penuh di §8b + OpenAPI: `GET /api/admin/reports` (JSON: omzet, t
 | `booking_slots` | `bookingId, courtId, slotDate, hour` — unik `(courtId, slotDate, hour)` = anti-overbooking |
 | `payments` | `bookingId, gateway, gatewayRef?, orderId?, amount, status, qrisPayload?, expiresAt?, paidAt?` — `qrisPayload.qrString` diisi saat charge (Batch 4) |
 | `closures` | `courtId, closureDate, startHour?/endHour? (null = sehari), reason?` |
-| `users` | `email (unik), passwordHash (scrypt), name, phone, isGuest, anonymizedAt?, emailVerified?` |
+| `users` | `email?, passwordHash? (scrypt; null untuk user bayangan), name, phone?, isGuest, anonymizedAt?, createdAt/updatedAt` |
 | `user_sessions` | `userId, tokenHash (SHA-256), expiresAt` |
+| `rate_limits` | `key (unik), count, windowStart` — fixed-window endpoint sensitif ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)) |
 | ~~`otp_codes`~~ | **dipensiunkan** ([ADR 0009](06-adr/0009-akun-email-password.md)) — di-drop saat migrasi |
 | `admins` / `admin_sessions` | `username + passwordHash (scrypt)` / `tokenHash (SHA-256), expiresAt` |
 | ~~`notification_logs`~~ | **dipensiunkan** ([ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)) — di-drop saat migrasi |
@@ -960,6 +1066,7 @@ Terdokumentasi penuh di §8b + OpenAPI: `GET /api/admin/reports` (JSON: omzet, t
 | `1.0-batch6` | 2026-09-30 | +2 endpoint Batch 6 (cron reminders, admin notifications) + contoh + skema OpenAPI baru + seksi log di `/admin/monitoring`. §7c, stub 9.5 terisi. |
 | `1.0-batch7` | 2026-09-30 | +1 endpoint Batch 7 (admin reports JSON + CSV) + contoh + skema OpenAPI baru + wiring `/admin/laporan`. §8b, stub 9.6 terisi. Seluruh batch 1–7 selesai. |
 | `1.1-auth` | 2026-11-12 | **Revisi scope:** §5a OTP → auth email+password (`/api/auth/register|login|logout|me`, reset admin); F6 + notifikasi dipensiunkan (§7c → `cron/anonymize`); `user_sessions` baru; `otp_codes` & `notification_logs` di-drop; rate-limit registrasi/login. Mengikuti ADR 0009–0011. |
+| `1.2-akun` | 2026-11-15 | **Akun + operasional:** sesi pemain pakai token acak + hash SHA-256 (bukan HMAC); `POST /api/auth/change-password` (§5a.5) + halaman `/akun`; `GET /api/admin/users` + `POST /api/admin/users/:id/reset-password` + halaman `/admin/users` (§7d); `GET /api/tickets/:kode` wajib login + pemilik (401/403, §5d.1); rate-limit endpoint sensitif pindah ke tabel Postgres `rate_limits`; jadwal Vercel Cron di `vercel.json` (§5c.4, §7c.1). Mengikuti ADR 0012–0013. |
 
 ---
 

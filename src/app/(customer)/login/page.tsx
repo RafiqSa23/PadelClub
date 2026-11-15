@@ -58,7 +58,7 @@ export default function LoginPage() {
             <p className="mt-4 max-w-sm text-body-md text-field-white/70">Masuk dengan email dan password untuk melihat booking yang tersimpan di akunmu.</p>
           </div>
           <div className="space-y-3 border-t border-field-white/15 pt-6 text-body-md text-field-white/75">
-            <p className="flex items-center gap-2"><IconTicket size={17} /> Buka tiket tanpa login</p>
+            <p className="flex items-center gap-2"><IconTicket size={17} /> Tiket & riwayat aman di akunmu</p>
             <p className="flex items-center gap-2"><IconShield size={17} /> Data tersimpan hanya untuk layanan booking</p>
           </div>
         </div>
@@ -101,7 +101,7 @@ export default function LoginPage() {
               </Link>
             </p>
             <div className="border-t border-line/80 pt-4 text-center">
-              <ButtonLink href="/tiket" variant="ghost" size="sm">Buka tiket tanpa login</ButtonLink>
+              <ButtonLink href="/" variant="ghost" size="sm">Kembali ke beranda</ButtonLink>
             </div>
           </form>
         </Card>

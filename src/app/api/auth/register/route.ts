@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { users } from '@/db/schema';
 import { isValidPhone, jsonError, jsonOk, normalizePhone } from '@/lib/api';
 import { MIN_PASSWORD_LENGTH, hashPassword } from '@/lib/password';
-import { rateLimit } from '@/lib/rate-limit';
+import { rateLimitDb } from '@/lib/rate-limit-db';
 import { createUserSession } from '@/lib/user-auth';
 import { customerCookieValue } from '@/lib/session';
 
@@ -15,7 +15,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  */
 export async function POST(request: Request) {
   const ip = request.headers.get('x-forwarded-for') ?? 'local';
-  const rl = rateLimit(`auth-register:${ip}`, 5, 60 * 60_000);
+  const rl = await rateLimitDb(`auth-register:${ip}`, 5, 60 * 60_000);
   if (!rl.allowed) return jsonError('Terlalu banyak pendaftaran, coba lagi nanti', 429);
 
   const body = (await request.json().catch(() => null)) as {

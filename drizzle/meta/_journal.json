@@ -36,6 +36,13 @@
       "when": 1794468000000,
       "tag": "0004_auth_user_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794761672050,
+      "tag": "0005_powerful_jack_flag",
+      "breakpoints": true
     }
   ]
 }

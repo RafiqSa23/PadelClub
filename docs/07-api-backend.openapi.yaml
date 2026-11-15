@@ -1,13 +1,13 @@
 openapi: 3.1.0
 info:
   title: Padel Court Booking — Backend API
-  version: 1.1-auth
+  version: 1.2-akun
   description: >-
     API backend Sistem Penyewaan Lapangan Padel (Next.js Route Handlers +
     Drizzle ORM + Neon PostgreSQL). Dokumen manusia: docs/07-api-backend.md.
-    Versi 1.1-auth = revisi scope 2026-11-12 (ADR 0009–0011): auth email+password
-    menggantikan OTP, notifikasi WhatsApp/Email dipensiunkan, user bayangan walk-in
-    dianonimisasi 7 hari. Operasi bertanda deprecated akan dihapus saat implementasi.
+    Versi 1.2-akun = revisi akun + operasional 2026-11-15 (ADR 0012–0013):
+    ganti password mandiri, reset password admin via /admin/users, tiket wajib
+    login + pemilik, rate-limit persisten (tabel rate_limits), cron Vercel.
 summary: API backend MVP Padel Court Booking
 servers:
   - url: /api
@@ -18,9 +18,11 @@ tags:
   - name: Pelanggan–Auth
     description: Akun email + password + sesi padel_session (ADR 0009). OTP dipensiunkan.
   - name: Pelanggan–Booking
-    description: Buat & baca booking (perlu sesi padel_session, kecuali detail via kode).
+    description: Buat & baca booking (perlu sesi padel_session; detail via kode tetap publik).
   - name: Admin–Auth
     description: Login sesi admin (cookie HttpOnly).
+  - name: Admin–Akun
+    description: Daftar akun pemain + reset password oleh admin (perlu sesi admin).
   - name: Admin–Jadwal
     description: Jadwal harian + penutupan lapangan (perlu sesi admin).
   - name: Admin–Monitoring
@@ -32,7 +34,7 @@ tags:
   - name: Pembayaran
     description: Charge QRIS, polling status, webhook gateway (F4).
   - name: Tiket
-    description: Tiket publik via kode + check-in admin (F5).
+    description: Tiket via kode — wajib login (pemilik) atau sesi admin + check-in admin (F5).
   - name: Cron
     description: Endpoint internal terjadwal (perlu CRON_SECRET).
 paths:
@@ -134,82 +136,111 @@ paths:
                       status: kosong
         '400':
           $ref: '#/components/responses/BadRequest'
-  /otp/request:
-    post:
-      deprecated: true
-      tags: [Pelanggan–Auth]
-      summary: '[DIPENSIUNKAN] Minta kode OTP 6 digit — diganti /auth/register'
-      operationId: otpRequest
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [phone]
-              properties:
-                phone:
-                  type: string
-                  example: '081234567890'
-                name:
-                  type: string
-                  example: Raka Pratama
-                  description: Disimpan saat akun auto-create di verify
+  /slots/status:
+    get:
+      tags: [Public]
+      summary: Polling delta jadwal (304 bila versi klien sama)
+      operationId: getSlotsStatus
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: '2026-10-05'
+        - name: v
+          in: query
+          required: false
+          description: Versi terakhir yang dipegang klien (-1 = belum tahu)
+          schema:
+            type: integer
+            example: 3
       responses:
-        '201':
-          description: 'OTP dibuat (mock: kode di log server; debugCode hanya non-produksi)'
+        '200':
+          description: Jadwal penuh (full) atau patch perubahan slot
           content:
             application/json:
               schema:
                 type: object
-                required: [ok, sentTo, expiresInSeconds]
+                required: [ok, v, full]
                 properties:
                   ok:
                     type: boolean
                     example: true
-                  sentTo:
-                    type: string
-                    example: '6281234567890'
-                  expiresInSeconds:
+                  v:
                     type: integer
-                    example: 300
-                  debugCode:
-                    type: string
-                    example: '914285'
+                    example: 4
+                  full:
+                    type: boolean
+                    example: false
+                  schedule:
+                    $ref: '#/components/schemas/DaySchedule'
+                  slots:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        courtId:
+                          type: integer
+                        hour:
+                          type: integer
+                        status:
+                          type: string
+                          enum: [kosong, menunggu_pembayaran, terkonfirmasi, tutup]
+                        code:
+                          type: [string, 'null']
+                        reason:
+                          type: [string, 'null']
+                        expiresAt:
+                          type: [string, 'null']
               example:
                 ok: true
-                sentTo: '6281234567890'
-                expiresInSeconds: 300
+                v: 4
+                full: false
+                slots:
+                  - courtId: 1
+                    hour: 8
+                    status: menunggu_pembayaran
+                    code: PD-VKB6WV
+                    reason: null
+                    expiresAt: '2026-09-29T18:09:50.197Z'
+        '304':
+          description: Tidak ada perubahan sejak versi klien
         '400':
           $ref: '#/components/responses/BadRequest'
         '429':
           $ref: '#/components/responses/RateLimited'
-  /otp/verify:
+  /auth/register:
     post:
-      deprecated: true
       tags: [Pelanggan–Auth]
-      summary: Verifikasi OTP → auto-create akun + cookie sesi (F3)
-      operationId: otpVerify
+      summary: Daftar akun email + password → sesi padel_session (F3, ADR 0009)
+      operationId: registerUser
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [phone, code]
+              required: [name, email, password, phone]
               properties:
-                phone:
-                  type: string
-                  example: '081234567890'
-                code:
-                  type: string
-                  example: '914285'
                 name:
                   type: string
                   example: Raka Pratama
+                email:
+                  type: string
+                  format: email
+                  example: raka@example.com
+                password:
+                  type: string
+                  minLength: 8
+                  example: rahasia123
+                phone:
+                  type: string
+                  example: '081234567890'
       responses:
-        '200':
-          description: Terverifikasi; cookie padel_session diset via Set-Cookie
+        '201':
+          description: Akun dibuat; cookie padel_session diset via Set-Cookie
           headers:
             Set-Cookie:
               schema:
@@ -224,26 +255,163 @@ paths:
                     type: boolean
                     example: true
                   user:
-                    type: object
-                    required: [id, name, phone]
-                    properties:
-                      id:
-                        type: integer
-                        example: 1
-                      name:
-                        type: string
-                      phone:
-                        type: string
+                    $ref: '#/components/schemas/User'
               example:
                 ok: true
                 user:
                   id: 1
-                  name: Raka Uji
+                  name: Raka Pratama
+                  email: raka@example.com
+                  phone: '6281234567890'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /auth/login:
+    post:
+      tags: [Pelanggan–Auth]
+      summary: Login pemain (email + password) → sesi padel_session
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: raka@example.com
+                password:
+                  type: string
+                  example: rahasia123
+      responses:
+        '200':
+          description: Login berhasil; cookie padel_session diset via Set-Cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, user]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  user:
+                    $ref: '#/components/schemas/User'
+              example:
+                ok: true
+                user:
+                  id: 1
+                  name: Raka Pratama
+                  email: raka@example.com
                   phone: '6281234567890'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /auth/logout:
+    post:
+      tags: [Pelanggan–Auth]
+      summary: Logout pemain (hapus sesi DB + cookie)
+      operationId: logoutUser
+      security:
+        - customerCookie: []
+      responses:
+        '200':
+          description: Sesi dihapus
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+  /auth/me:
+    get:
+      tags: [Pelanggan–Auth]
+      summary: Profil pemain dari sesi berjalan
+      operationId: meUser
+      security:
+        - customerCookie: []
+      responses:
+        '200':
+          description: Profil sesi berjalan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, user]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  user:
+                    $ref: '#/components/schemas/User'
+              example:
+                ok: true
+                user:
+                  id: 1
+                  name: Raka Pratama
+                  email: raka@example.com
+                  phone: '6281234567890'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/change-password:
+    post:
+      tags: [Pelanggan–Auth]
+      summary: Ganti password saat login (ADR 0012; sesi lain dicabut)
+      operationId: changePassword
+      security:
+        - customerCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  example: rahasia123
+                newPassword:
+                  type: string
+                  minLength: 8
+                  example: rahasiaBaru456
+      responses:
+        '200':
+          description: Password diganti; sesi perangkat lain berakhir
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, changed]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  changed:
+                    type: boolean
+                    example: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '429':
           $ref: '#/components/responses/RateLimited'
   /bookings:
@@ -1210,6 +1378,9 @@ paths:
       tags: [Cron]
       summary: Kedaluwarsakan menunggu_pembayaran > 15 mnt (F4, ADR 0006)
       operationId: expireBookings
+      description: >-
+        Dijadwalkan Vercel Cron setiap 5 menit (vercel.json). Juga membersihkan
+        baris rate_limits yang sudah basi (ADR 0013).
       parameters:
         - name: secret
           in: query
@@ -1246,8 +1417,15 @@ paths:
   /tickets/{kode}:
     get:
       tags: [Tiket]
-      summary: Tiket publik via kode — tanpa login (F5)
+      summary: Tiket via kode — wajib login, hanya pemilik atau admin (F5)
       operationId: getTicket
+      security:
+        - customerCookie: []
+        - cookieAuth: []
+        - {}
+      description: >-
+        Pemain hanya boleh membuka tiket miliknya sendiri (userId cocok sesi).
+        Admin bersesi boleh membuka semua tiket. Tanpa sesi → 401; pemain lain → 403.
       parameters:
         - name: kode
           in: path
@@ -1329,6 +1507,14 @@ paths:
                   checkedInAt: null
                   checkedInBy: null
                   closureNotice: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Sesi pemain lain (bukan pemilik tiket)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
   /admin/checkin:
@@ -1396,87 +1582,14 @@ paths:
               example:
                 ok: false
                 message: Hanya booking terkonfirmasi yang bisa check-in
-  /admin/notifications:
+  /cron/anonymize:
     get:
-      deprecated: true
-      tags: [Admin–Monitoring]
-      summary: '[DIPENSIUNKAN] Baca log notifikasi — notifikasi dicabut dari MVP (ADR 0010)'
-      operationId: listNotifications
-      security:
-        - cookieAuth: []
-      parameters:
-        - name: type
-          in: query
-          schema:
-            type: string
-            enum: [tiket, pengingat_h1, pengingat_h2, sisa_pembayaran, kadaluarsa]
-        - name: channel
-          in: query
-          schema:
-            type: string
-            enum: [whatsapp, email]
-        - name: status
-          in: query
-          schema:
-            type: string
-            enum: [terkirim, gagal]
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            maximum: 100
-            default: 50
-        - name: offset
-          in: query
-          schema:
-            type: integer
-            default: 0
-      responses:
-        '200':
-          description: Daftar log + total
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [ok, logs, total, limit, offset]
-                properties:
-                  ok:
-                    type: boolean
-                    example: true
-                  logs:
-                    type: array
-                    items:
-                      type: object
-                  total:
-                    type: integer
-                  limit:
-                    type: integer
-                  offset:
-                    type: integer
-              example:
-                ok: true
-                logs:
-                  - id: 3
-                    bookingId: 7
-                    code: PD-YTZE3G
-                    channel: whatsapp
-                    type: pengingat_h2
-                    status: terkirim
-                    sentAt: '2026-09-30T12:30:00.000Z'
-                    error: null
-                total: 3
-                limit: 5
-                offset: 0
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-  /cron/reminders:
-    get:
-      deprecated: true
       tags: [Cron]
-      summary: '[DIPENSIUNKAN] Kirim pengingat H-1 & H-2jam — F6 dibatalkan (ADR 0010)'
-      operationId: sendReminders
+      summary: Anonimisasi user bayangan walk-in > 7 hari (ADR 0011)
+      operationId: cronAnonymize
+      description: >-
+        Dijadwalkan Vercel Cron harian 03:00 UTC (vercel.json). Memproses guest
+        tanpa booking aktif & booking terakhir > 7 hari; baris user/booking tidak dihapus.
       parameters:
         - name: secret
           in: query
@@ -1486,39 +1599,129 @@ paths:
           description: Alternatif header x-cron-secret / Bearer (CRON_SECRET)
       responses:
         '200':
-          description: Hasil pengiriman batch ini
+          description: Hasil anonimisasi batch ini
           content:
             application/json:
               schema:
                 type: object
-                required: [ok, checked, skipped, sent, failed]
+                required: [ok, anonymized, skipped]
                 properties:
                   ok:
                     type: boolean
                     example: true
-                  checked:
+                  anonymized:
                     type: integer
+                    example: 2
                   skipped:
                     type: integer
-                  sent:
-                    type: array
-                    items:
-                      type: object
-                  failed:
-                    type: array
-                    items:
-                      type: object
+                    example: 0
               example:
                 ok: true
-                checked: 3
-                skipped: 2
-                sent:
-                  - code: PD-YTZE3G
-                    type: pengingat_h2
-                    channel: whatsapp
-                failed: []
+                anonymized: 2
+                skipped: 0
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /admin/users:
+    get:
+      tags: [Admin–Akun]
+      summary: Daftar/cari akun pemain (maks 25, terbaru dulu)
+      operationId: listUsers
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Cocokkan nama/email/nomor HP (case-insensitive)
+      responses:
+        '200':
+          description: Daftar akun
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, users]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminUser'
+              example:
+                ok: true
+                users:
+                  - id: 1
+                    name: Raka Pratama
+                    email: raka@example.com
+                    phone: '6281234567890'
+                    isGuest: false
+                    anonymizedAt: null
+                    createdAt: '2026-11-12T09:10:00.000Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /admin/users/{id}/reset-password:
+    post:
+      tags: [Admin–Akun]
+      summary: Reset password pemain oleh admin (mengakhiri seluruh sesi user)
+      operationId: adminResetPassword
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  minLength: 8
+                  example: sementara123
+      responses:
+        '200':
+          description: Password diganti; semua sesi user berakhir
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, userId]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  userId:
+                    type: integer
+                    example: 1
+              example:
+                ok: true
+                userId: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: User bayangan tidak punya password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                ok: false
+                message: User bayangan tidak punya password
   /admin/reports:
     get:
       tags: [Admin–Laporan]
@@ -1624,7 +1827,7 @@ components:
       type: apiKey
       in: cookie
       name: padel_session
-      description: Sesi pelanggan HMAC (HttpOnly). Diperoleh dari POST /auth/login atau /auth/register.
+      description: Sesi pelanggan (HttpOnly; token acak 32 byte, hash SHA-256 di DB). Diperoleh dari POST /auth/login atau /auth/register.
   responses:
     BadRequest:
       description: Validasi gagal
@@ -1791,6 +1994,40 @@ components:
           type: integer
         username:
           type: string
+    User:
+      type: object
+      description: Profil pemain (tanpa password/hash)
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: [string, 'null']
+        phone:
+          type: [string, 'null']
+    AdminUser:
+      type: object
+      description: Baris akun pemain untuk halaman admin (termasuk guest bayangan)
+      required: [id, name, isGuest, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: [string, 'null']
+        phone:
+          type: [string, 'null']
+        isGuest:
+          type: boolean
+        anonymizedAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
     ScheduleBooking:
       type: object
       description: Booking per tanggal (jam dikelompokkan) untuk modal admin
