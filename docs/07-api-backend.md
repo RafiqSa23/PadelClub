@@ -2,7 +2,7 @@
 
 > Referensi teknis untuk seluruh endpoint backend (`src/app/api/`).
 > Spesifikasi mesin-terbaca: [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) (impor ke Postman / Swagger UI).
-> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.5-qr` (QR bertanda tangan + log pemindaian 2026-11-17).**
+> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.6-hardening` (header keamanan + retensi audit 2026-11-17).**
 > Source of truth implementasi tetap kode di `src/app/api/` + skema `src/db/schema.ts`.
 
 ## Isi Dokumen
@@ -845,12 +845,14 @@ curl "http://localhost:3100/api/admin/overview?date=2026-10-08" -b cookies.txt
 
 Perlu `CRON_SECRET` (pola sama dengan `/api/cron/expire`). Dijadwalkan `vercel.json` **harian 03:00 UTC** (`0 3 * * *`). Memproses `users` dengan `is_guest = true` yang tidak punya booking aktif dan booking terakhirnya lebih dari 7 hari lalu: nama → `"Tamu"`, `phone`/`email` → `NULL`, `anonymized_at` diisi. Baris user & booking **tidak dihapus** ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
 
+Cron yang sama membersihkan sesi kedaluwarsa dan audit `scan_logs` yang lebih tua dari retensi ([ADR 0015](06-adr/0015-header-keamanan-retensi-audit.md)). Retensi default **90 hari**, env `SCAN_LOG_RETENTION_DAYS` dijepit 7–365.
+
 ```bash
 curl -H 'x-cron-secret: dev-cron-secret-lokal' http://localhost:3100/api/cron/anonymize
 ```
 
 ```json
-{ "ok": true, "anonymized": 2, "skipped": 0 }
+{ "ok": true, "anonymized": 2, "cutoff": "2026-11-10T03:00:00.000Z", "scanLogsDeleted": 5, "scanLogRetentionDays": 90 }
 ```
 
 | Error | Kode | Contoh `message` |
@@ -1118,6 +1120,7 @@ Ganti password mandiri (§5a.5, `/akun`, [ADR 0012](06-adr/0012-ganti-password-m
 | `1.3-privasi` | 2026-11-17 | **Privasi booking:** `GET /api/bookings/:code` tidak lagi publik — wajib sesi, pemain hanya pemilik (401/403), admin boleh semua (§5b.2 + OpenAPI). Test guard privasi ditambah (tiket tanpa sesi 401, guest reset 409). |
 | `1.4-checkin` | 2026-11-17 | **Jendela check-in gate:** `POST /api/admin/checkin` hanya hari-H (WIB), buka 30 menit sebelum jam pertama, tutup saat sesi terakhir berakhir; di luar jendela → 409 dengan pesan spesifik (§5d.2 + OpenAPI). Logika `src/lib/checkin-window.ts`; unit test + HTTP 409/sukses. |
 | `1.5-qr` | 2026-11-17 | **QR bertanda tangan + audit gate:** `GET /api/tickets/:kode` mengembalikan `qrPayload`/`qrExpiresAt` (HMAC-SHA256, TTL 5 menit) dan memverifikasi `?qr=` (403 bila palsu/kedaluwarsa) (§5d.1); `POST /api/admin/checkin` menulis `scan_logs`; endpoint baru `GET /api/admin/scans` untuk riwayat persist (§5d.3). Migrasi `0006`. Mengikuti ADR 0014. |
+| `1.6-hardening` | 2026-11-17 | **Header keamanan + retensi audit:** semua respons memuat CSP terbatas (`frame-ancestors 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, dan HSTS hanya di produksi; `X-Powered-By` dihapus. `GET /api/cron/anonymize` kini juga menghapus `scan_logs` lebih tua dari retensi (default 90 hari, `SCAN_LOG_RETENTION_DAYS`) dan mengembalikan `scanLogsDeleted`/`scanLogRetentionDays` (§7c.1). Mengikuti ADR 0015. |
 
 ---
 

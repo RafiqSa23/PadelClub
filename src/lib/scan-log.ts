@@ -1,5 +1,7 @@
+import { lt } from "drizzle-orm";
 import { db } from "@/db";
 import { scanLogs } from "@/db/schema";
+import { scanLogCutoff, scanLogRetentionDays } from "@/lib/scan-log-retention";
 
 export type ScanOutcome = "ok" | "already" | "rejected";
 
@@ -28,5 +30,25 @@ export async function recordScan(input: ScanLogInput): Promise<void> {
     });
   } catch (error) {
     console.error("[scan-log] gagal menyimpan log pemindaian", error);
+  }
+}
+
+/**
+ * Hapus audit pemindaian yang lebih tua dari retensi (ADR 0015). Dipanggil
+ * cron harian bersama anonimisasi. Best-effort: kegagalan tidak boleh
+ * menggagalkan cron lain, jadi jumlah 0 dikembalikan dan error dicatat.
+ */
+export async function cleanupScanLogs(
+  retentionDays: number = scanLogRetentionDays(),
+): Promise<number> {
+  try {
+    const deleted = await db
+      .delete(scanLogs)
+      .where(lt(scanLogs.createdAt, scanLogCutoff(retentionDays)))
+      .returning({ id: scanLogs.id });
+    return deleted.length;
+  } catch (error) {
+    console.error("[scan-log] gagal membersihkan log lama", error);
+    return 0;
   }
 }

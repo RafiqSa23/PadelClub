@@ -110,16 +110,23 @@ describe("alur admin (F7–F11)", () => {
   });
 
   it("walk-in hari ini siap check-in dalam jendela", async () => {
-    const wibToday = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const nowWibHour = new Date(Date.now() + 7 * 60 * 60 * 1000).getUTCHours();
+    // WIB = UTC+7; hitung jam berjalan dari epoch, bukan zona waktu mesin.
+    const wibNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    const wibToday = wibNow.toISOString().slice(0, 10);
+    const nowWibMinutes = wibNow.getUTCHours() * 60 + wibNow.getUTCMinutes();
     const schedule = await admin.get<{
       schedule: { slots: { courtId: number; hour: number; status: string }[] };
     }>(`/api/admin/schedule?date=${wibToday}`);
+    // Hanya slot yang sesinya sedang berjalan — check-in dibuka H-30 menit,
+    // jadi slot yang belum mulai akan ditolak 409.
     const upcoming = schedule.body.schedule.slots.find(
-      (slot) => slot.status === "kosong" && slot.hour >= nowWibHour && slot.hour < 23,
+      (slot) =>
+        slot.status === "kosong" &&
+        slot.hour * 60 <= nowWibMinutes &&
+        nowWibMinutes < (slot.hour + 1) * 60,
     );
     if (!upcoming) {
-      // Tes dijalankan mendekati/di luar jam operasional WIB — jalur sukses
+      // Tes dijalankan di luar sesi berjalan (mis. dini hari WIB) — jalur sukses
       // check-in dilewati; jendela tetap diuji unit test 05-checkin-window.
       return;
     }

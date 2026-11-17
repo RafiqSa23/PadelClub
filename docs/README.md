@@ -11,10 +11,10 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | User Journey | ✅ Selesai |
 | Spesifikasi Fitur | ✅ Selesai |
 | PRD | ✅ Selesai |
-| Keputusan Arsitektur (ADR) | ✅ Selesai (14 keputusan) |
+| Keputusan Arsitektur (ADR) | ✅ Selesai (15 keputusan) |
 | Spesifikasi Teknis | ⏳ Sebagian (PRD §4 + ADR 0005 & 0007) |
 | Design System (DESIGN.md) | ✅ Diadopsi (token di `src/app/globals.css`) |
-| Dokumentasi Backend API (07) | ✅ `1.5-qr` (34 paths / 36 operasi) |
+| Dokumentasi Backend API (07) | ✅ `1.6-hardening` (34 paths / 36 operasi) |
 
 ## Indeks Dokumen
 
@@ -39,6 +39,7 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | [`06-adr/0012-ganti-password-mandiri.md`](06-adr/0012-ganti-password-mandiri.md) | Keputusan: ganti password mandiri saat login (sesi lain dicabut) | Referensi |
 | [`06-adr/0013-rate-limit-cron-produksi.md`](06-adr/0013-rate-limit-cron-produksi.md) | Keputusan: rate-limit Postgres lintas-instance + Vercel Cron | Referensi |
 | [`06-adr/0014-qr-tiket-bertanda-tangan.md`](06-adr/0014-qr-tiket-bertanda-tangan.md) | Keputusan: QR tiket HMAC + rotasi 5 menit + log pemindaian gate | Referensi |
+| [`06-adr/0015-header-keamanan-retensi-audit.md`](06-adr/0015-header-keamanan-retensi-audit.md) | Keputusan: header keamanan global + retensi `scan_logs` 90 hari | Referensi |
 | [`DESIGN.md`](DESIGN.md) | Design system (diadopsi, status slot + arah visual) | Referensi |
 | [`07-api-backend.md`](07-api-backend.md) | Dokumentasi backend API + contoh curl (versi per batch) | Referensi |
 | [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) | Spesifikasi OpenAPI 3.1 (impor Postman/Swagger UI) | Referensi |
@@ -65,6 +66,7 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 8. **Ganti password mandiri** saat sudah login di `/akun`; reset lupa password tetap lewat admin ([ADR 0012](06-adr/0012-ganti-password-mandiri.md)).
 9. Rate-limit endpoint sensitif **persisten di Postgres** + cron produksi via **Vercel Cron** ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)).
 10. QR tiket **bertanda tangan HMAC** dengan rotasi 5 menit; log pemindaian gate disimpan di `scan_logs` ([ADR 0014](06-adr/0014-qr-tiket-bertanda-tangan.md)).
+11. **Header keamanan global** (CSP terbatas, HSTS produksi) + retensi audit `scan_logs` **90 hari** ([ADR 0015](06-adr/0015-header-keamanan-retensi-audit.md)).
 
 ## Changelog
 
@@ -97,3 +99,4 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | 2026-11-17 | QR tiket asli (`qrcode.react`) + scanner kamera gate (`jsqr`, dedupe 8 dtk, pilih kamera, fallback manual); F5 AC diperbarui. |
 | 2026-11-17 | Jendela check-in gate hari-H (WIB, H-30 mnt s/d sesi berakhir) di API + pesan scanner; bunyi gate sukses/gagal; docs API `1.4-checkin`. 67 test lulus (5 file). |
 | 2026-11-17 | ADR 0014: QR tiket bertanda tangan HMAC (TTL 5 mnt, `TICKET_QR_SECRET`) + verifikasi `?qr=` + log pemindaian persist (`scan_logs`, `GET /api/admin/scans`); migrasi `0006`; docs API `1.5-qr`. |
+| 2026-11-17 | ADR 0015: header keamanan global (CSP terbatas, `nosniff`, `DENY`, referrer/permissions policy, HSTS produksi, tanpa `X-Powered-By`) + retensi `scan_logs` 90 hari (`SCAN_LOG_RETENTION_DAYS`, cron anonimisasi); docs API `1.6-hardening`. |

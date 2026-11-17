@@ -1,11 +1,13 @@
 openapi: 3.1.0
 info:
   title: Padel Court Booking — Backend API
-  version: 1.5-qr
+  version: 1.6-hardening
   description: >-
     API backend Sistem Penyewaan Lapangan Padel (Next.js Route Handlers +
     Drizzle ORM + Neon PostgreSQL). Dokumen manusia: docs/07-api-backend.md.
-    Versi 1.5-qr = revisi 2026-11-17: QR tiket bertanda tangan (HMAC, TTL 5
+    Versi 1.6-hardening = revisi 2026-11-17: header keamanan global (CSP
+    terbatas, HSTS produksi) + retensi scan_logs 90 hari di cron anonymize
+    (ADR 0015). Sebelumnya 1.5-qr: QR tiket bertanda tangan (HMAC, TTL 5
     menit), verifikasi ?qr= di endpoint tiket, log pemindaian persist + endpoint
     GET /admin/scans (ADR 0014); jendela check-in hari-H (WIB).
 summary: API backend MVP Padel Court Booking
@@ -1703,6 +1705,8 @@ paths:
       description: >-
         Dijadwalkan Vercel Cron harian 03:00 UTC (vercel.json). Memproses guest
         tanpa booking aktif & booking terakhir > 7 hari; baris user/booking tidak dihapus.
+        Juga membersihkan sesi kedaluwarsa dan audit scan_logs lebih tua dari
+        retensi (default 90 hari, env SCAN_LOG_RETENTION_DAYS 7-365; ADR 0015).
       parameters:
         - name: secret
           in: query
@@ -1717,7 +1721,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, anonymized, skipped]
+                required: [ok, anonymized, cutoff, scanLogsDeleted, scanLogRetentionDays]
                 properties:
                   ok:
                     type: boolean
@@ -1725,13 +1729,22 @@ paths:
                   anonymized:
                     type: integer
                     example: 2
-                  skipped:
+                  cutoff:
+                    type: string
+                    format: date-time
+                    example: '2026-11-10T03:00:00.000Z'
+                  scanLogsDeleted:
                     type: integer
-                    example: 0
+                    example: 5
+                  scanLogRetentionDays:
+                    type: integer
+                    example: 90
               example:
                 ok: true
                 anonymized: 2
-                skipped: 0
+                cutoff: '2026-11-10T03:00:00.000Z'
+                scanLogsDeleted: 5
+                scanLogRetentionDays: 90
         '401':
           $ref: '#/components/responses/Unauthorized'
   /admin/users:

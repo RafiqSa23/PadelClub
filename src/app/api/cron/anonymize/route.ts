@@ -2,6 +2,8 @@ import { and, eq, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { userSessions, users } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
+import { cleanupScanLogs } from '@/lib/scan-log';
+import { scanLogRetentionDays } from '@/lib/scan-log-retention';
 
 export const GUEST_RETENTION_DAYS = 7; // ADR 0011
 
@@ -65,5 +67,14 @@ export async function GET(request: Request) {
   // Bersihkan sesi kedaluwarsa (rumah tangga, murah).
   await db.delete(userSessions).where(lt(userSessions.expiresAt, new Date()));
 
-  return jsonOk({ anonymized, cutoff: cutoff.toISOString() });
+  // Retensi audit gate (ADR 0015) — harian, tidak memblokir cron lain.
+  const retentionDays = scanLogRetentionDays();
+  const scanLogsDeleted = await cleanupScanLogs(retentionDays);
+
+  return jsonOk({
+    anonymized,
+    cutoff: cutoff.toISOString(),
+    scanLogsDeleted,
+    scanLogRetentionDays: retentionDays,
+  });
 }

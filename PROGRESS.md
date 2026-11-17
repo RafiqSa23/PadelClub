@@ -132,6 +132,8 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - Test guard privasi: booking tanpa sesi 401, pemain lain 403, tiket tanpa sesi 401, reset password user bayangan 409.
 - QR tiket asli (`qrcode.react`) + scanner kamera gate (`jsqr`) dengan dedupe, pilih kamera, dan fallback manual. Verifikasi izin/stream kamera tetap butuh uji manual di browser (tidak bisa diuji headless); `lint`/`typecheck`/`build` hijau.
 - Jendela check-in gate: hari-H, buka 30 menit sebelum jam pertama, tutup saat sesi terakhir berakhir (WIB); API menolak 409 dengan pesan spesifik. Bunyi gate sukses/gagal bisa diaktifkan/dimatikan.
+- Header keamanan global (ADR 0015): CSP terbatas (`frame-ancestors 'none'`, `object-src 'none'`, `base-uri`/`form-action` self), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` (kamera self), HSTS hanya produksi, `X-Powered-By` dihapus. Sumber tunggal `src/lib/security-headers.ts`.
+- Retensi audit gate (ADR 0015): `scan_logs` dipangkas di cron anonimisasi harian; default 90 hari, env `SCAN_LOG_RETENTION_DAYS` dijepit 7–365. Respons cron menambah `scanLogsDeleted`/`scanLogRetentionDays`.
 
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 
@@ -184,6 +186,15 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **79 test lulus (6 
 - **HTTP (`02-admin-flow`):** check-in +45 hari dan check-in sukses menulis `scan_logs`; `GET /api/admin/scans?limit=5` mengembalikan log dengan outcome valid.
 - **UI:** halaman tiket merotasi QR tiap ±4 menit + saat tab aktif; scanner kamera hanya menerima token bertanda tangan, sedangkan input manual tetap kode polos; riwayat dimuat dari server dan bertahan setelah reload.
 - **Batas uji:** scan kamera fisik & screenshot tetap perlu uji manual di browser. Screenshot masih berlaku sampai TTL 5 menit (lihat ADR 0014).
+
+## Uji Header Keamanan & Retensi Audit (2026-11-17)
+
+Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **84 test lulus (7 file).** `lint`, `typecheck`, `build` hijau.
+
+- **Header (`07-hardening`):** `/api/health` mengirim CSP `frame-ancestors 'none'`, `nosniff`, `DENY`, referrer & permissions policy; `X-Powered-By` tidak ada. Unit: HSTS hanya saat `isProduction`, nilai `max-age=31536000`.
+- **Retensi:** unit parse env (default 90, jepit 7/365, nilai sampah → default) + cutoff 7 hari. HTTP: baris `scan_logs` 400 hari terhapus oleh cron anonimisasi, baris baru tetap ada; respons memuat `scanLogsDeleted` + `scanLogRetentionDays`.
+- **Batas uji:** HSTS belum diverifikasi di domain produksi (dev memakai HTTP). CSP penuh (`script-src`/`connect-src`) sengaja belum aktif sampai Midtrans Snap diuji e2e (ADR 0015).
+- **Perbaikan uji:** guard "walk-in hari ini" di `02-admin-flow` kini hanya memilih slot yang **sedang berjalan** (bukan slot berikutnya), sehingga run dini hari WIB tidak lagi gagal 409 karena jendela check-in belum dibuka.
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 

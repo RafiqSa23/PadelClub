@@ -52,6 +52,8 @@ Padel Court Booking — product specs in `docs/` (Bahasa Indonesia) plus a Next.
 - Cron produksi di `vercel.json`: `/api/cron/expire` tiap 5 menit, `/api/cron/anonymize` harian 03:00 UTC (`CRON_SECRET` wajib di produksi). `/api/cron/expire` juga menjalankan `cleanupRateLimits()`.
 - CI: `.github/workflows/ci.yml` — job `quality` (lint + typecheck + build) selalu jalan; job `api-tests` aktif bila repo variable `API_TESTS_ENABLED=1` dan secret `TEST_DATABASE_URL` diisi.
 - Sesi pemain memakai token acak 32 byte; DB menyimpan **hash SHA-256** (`user_sessions.tokenHash`), bukan HMAC. `SESSION_SECRET` tidak dipakai dan sudah dihapus dari template env.
+- Header keamanan global ([ADR 0015](docs/06-adr/0015-header-keamanan-retensi-audit.md)): sumber tunggal `src/lib/security-headers.ts`, dipasang via `next.config.ts` (`headers()`, `poweredByHeader: false`). CSP sengaja terbatas (`frame-ancestors`/`object-src`/`base-uri`/`form-action`) karena `script-src` penuh akan memblokir Midtrans Snap — jangan tambah `default-src 'self'` tanpa menguji pembayaran. HSTS hanya saat `NODE_ENV=production`.
+- Retensi `scan_logs`: 90 hari default (`SCAN_LOG_RETENTION_DAYS`, jepit 7–365), dibersihkan di `GET /api/cron/anonymize` harian, bukan cron expire. Helper murni `src/lib/scan-log-retention.ts`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
