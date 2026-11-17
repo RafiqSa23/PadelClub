@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { Brand, BrandMark } from "./Brand";
 import { MIcon } from "@/components/ui/MIcon";
 import { COURTS } from "@/lib/mock-data";
+import { useCurrentUser } from "@/lib/use-current-user";
 
 const ACTIVE_COURTS = COURTS.filter((court) => court.isActive).length;
 
@@ -27,6 +28,8 @@ function isActivePath(pathname: string, href: string) {
 export function PublicHeader() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const user = useCurrentUser();
+  const signedIn = Boolean(user);
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 bg-field-white/95 shadow-[0_1px_8px_rgba(0,0,0,0.04)] backdrop-blur-md">
@@ -64,11 +67,11 @@ export function PublicHeader() {
 
         <div className="flex shrink-0 items-center gap-3">
           <Link
-            href="/login"
+            href={signedIn ? "/akun" : "/login"}
             className="hidden min-h-11 items-center gap-1.5 rounded-lg bg-primary-container px-4 text-label-md text-field-white shadow-sm transition-colors hover:bg-court-green-deep sm:inline-flex"
           >
-            Masuk
-            <MIcon name="arrow_forward" className="text-[18px]" />
+            {signedIn ? "Akun" : "Masuk"}
+            <MIcon name={signedIn ? "person" : "arrow_forward"} className="text-[18px]" />
           </Link>
           <button
             type="button"
@@ -128,12 +131,12 @@ export function PublicHeader() {
               })}
             </nav>
             <Link
-              href="/login"
+              href={signedIn ? "/akun" : "/login"}
               onClick={() => setOpen(false)}
               className="mt-auto flex min-h-11 items-center justify-center gap-2 rounded-xl bg-primary-container text-label-lg text-field-white"
             >
-              Masuk
-              <MIcon name="arrow_forward" className="text-[18px]" />
+              {signedIn ? "Akun" : "Masuk"}
+              <MIcon name={signedIn ? "person" : "arrow_forward"} className="text-[18px]" />
             </Link>
           </div>
         </div>

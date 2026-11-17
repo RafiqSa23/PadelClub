@@ -13,8 +13,8 @@ import {
 } from "../helpers/api";
 
 /**
- * Akun: ganti password mandiri (ADR 0012) + reset password oleh admin.
- * Satu akun + alur walk-in, ±17 request; cleanup memakai email/HP test yang sama.
+ * Akun: ganti password mandiri (ADR 0012) + reset password oleh admin + logout.
+ * Satu akun + alur walk-in, ±22 request; cleanup memakai email/HP test yang sama.
  */
 
 const NEW_PASSWORD = "rahasia-baru-456";
@@ -137,6 +137,23 @@ describe("akun: ganti & reset password (ADR 0012)", () => {
     expect(me.status).toBe(401);
   });
 
+  it("logout menghapus sesi + cookie", async () => {
+    const fresh = apiClient();
+    const login = await fresh.post("/api/auth/login", {
+      email: TEST_EMAIL,
+      password: TEST_PASSWORD,
+    });
+    expect(login.status).toBe(200);
+    expect(fresh.hasCookie("padel_session")).toBe(true);
+
+    const logout = await fresh.post<{ ok: boolean }>("/api/auth/logout");
+    expect(logout.status).toBe(200);
+    expect(fresh.hasCookie("padel_session")).toBe(false);
+
+    const me = await fresh.get("/api/auth/me");
+    expect(me.status).toBe(401);
+  });
+
   it("reset password user bayangan ditolak 409", async () => {
     const date = isoDate(48);
     const admin = apiClient();
@@ -178,6 +195,6 @@ describe("akun: ganti & reset password (ADR 0012)", () => {
   });
 
   it("jumlah request tetap di bawah anggaran", () => {
-    expect(requestCountSoFar()).toBeLessThanOrEqual(18);
+    expect(requestCountSoFar()).toBeLessThanOrEqual(22);
   });
 });

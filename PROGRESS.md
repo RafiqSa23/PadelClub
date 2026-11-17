@@ -135,6 +135,11 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - Header keamanan global (ADR 0015): CSP terbatas (`frame-ancestors 'none'`, `object-src 'none'`, `base-uri`/`form-action` self), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy` (kamera self), HSTS hanya produksi, `X-Powered-By` dihapus. Sumber tunggal `src/lib/security-headers.ts`.
 - Retensi audit gate (ADR 0015): `scan_logs` dipangkas di cron anonimisasi harian; default 90 hari, env `SCAN_LOG_RETENTION_DAYS` dijepit 7–365. Respons cron menambah `scanLogsDeleted`/`scanLogRetentionDays`.
 
+**Selesai 2026-11-18:**
+- Seed 2 akun pemain demo (`pemain@padelclub.test`, `pemain2@padelclub.test`) — lihat Catatan Operasional.
+- Navbar publik sadar-sesi (`useCurrentUser`): tombol kanan/drawer berubah "Masuk" → "Akun" setelah login.
+- Tombol **Keluar** di `/akun` memanggil `POST /api/auth/logout` (hapus sesi DB + cookie), lalu reload ke beranda.
+
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 
 Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji terpisah setelah migrasi `0004_auth_user_sessions`. **44 test lulus (3 file).** `lint`, `typecheck`, `build` hijau.
@@ -195,6 +200,14 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **84 test lulus (7 
 - **Retensi:** unit parse env (default 90, jepit 7/365, nilai sampah → default) + cutoff 7 hari. HTTP: baris `scan_logs` 400 hari terhapus oleh cron anonimisasi, baris baru tetap ada; respons memuat `scanLogsDeleted` + `scanLogRetentionDays`.
 - **Batas uji:** HSTS belum diverifikasi di domain produksi (dev memakai HTTP). CSP penuh (`script-src`/`connect-src`) sengaja belum aktif sampai Midtrans Snap diuji e2e (ADR 0015).
 - **Perbaikan uji:** guard "walk-in hari ini" di `02-admin-flow` kini hanya memilih slot yang **sedang berjalan** (bukan slot berikutnya), sehingga run dini hari WIB tidak lagi gagal 409 karena jendela check-in belum dibuka.
+
+## Uji Logout & Navbar Sadar-Sesi (2026-11-18)
+
+Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **85 test lulus (7 file).** `lint`, `typecheck`, `build` hijau.
+
+- **HTTP (`04-account`):** login 200 + cookie `padel_session`; `POST /api/auth/logout` 200; cookie hilang; `GET /api/auth/me` 401 (sesi DB terhapus).
+- **UI:** navbar publik berubah "Masuk" (href `/login`) → "Akun" (href `/akun`) setelah `/api/auth/me` mengembalikan user; drawer mobile ikut. Tombol **Keluar** di `/akun` memanggil logout lalu kembali ke beranda dan memberi sinyal `invalidateCurrentUser()` agar navbar langsung berubah.
+- **Batas uji:** perubahan label navbar adalah perilaku client (fetch `/api/auth/me`), tidak diuji headless; verifikasi manual di browser tetap diperlukan.
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 

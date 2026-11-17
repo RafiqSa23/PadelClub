@@ -54,6 +54,7 @@ Padel Court Booking — product specs in `docs/` (Bahasa Indonesia) plus a Next.
 - Sesi pemain memakai token acak 32 byte; DB menyimpan **hash SHA-256** (`user_sessions.tokenHash`), bukan HMAC. `SESSION_SECRET` tidak dipakai dan sudah dihapus dari template env.
 - Header keamanan global ([ADR 0015](docs/06-adr/0015-header-keamanan-retensi-audit.md)): sumber tunggal `src/lib/security-headers.ts`, dipasang via `next.config.ts` (`headers()`, `poweredByHeader: false`). CSP sengaja terbatas (`frame-ancestors`/`object-src`/`base-uri`/`form-action`) karena `script-src` penuh akan memblokir Midtrans Snap — jangan tambah `default-src 'self'` tanpa menguji pembayaran. HSTS hanya saat `NODE_ENV=production`.
 - Retensi `scan_logs`: 90 hari default (`SCAN_LOG_RETENTION_DAYS`, jepit 7–365), dibersihkan di `GET /api/cron/anonymize` harian, bukan cron expire. Helper murni `src/lib/scan-log-retention.ts`.
+- Navbar publik (`PublicHeader`) memakai hook client `src/lib/use-current-user.ts` (`GET /api/auth/me`): tombol kanan + footer drawer menampilkan **Akun** (href `/akun`) saat login, **Masuk** saat belum. Logout pemain ada di `/akun` (`POST /api/auth/logout`, lalu `window.location.assign("/")` agar status navbar ikut reset).
 
 <!-- BEGIN:nextjs-agent-rules -->
 
