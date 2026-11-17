@@ -25,7 +25,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S12 | Lib backend shared (slots, sesi token+hash, rate-limit, payment mock/midtrans) | ✅ | `src/lib/*.ts` (2026-09-30; sesi pemain token acak + SHA-256 sejak 2026-11-12) |
 | S13 | Auth admin backend (scrypt + sesi DB, ganti cookie demo) | ✅ | `POST /api/admin/login|logout`, `GET /api/admin/me` (2026-09-30) |
 | S14 | Index hot-path + connection pool DB | ✅ | Migrasi `0003` (11 index: cron, riwayat, grid, OTP, log) + `max: 5` di `src/db/index.ts` (2026-11-10) |
-| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (4 file, ±70 request), guard DB test + localhost, `npm run test:api` (2026-11-10; file akun ditambah 2026-11-15; guard privasi booking 2026-11-17) |
+| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (5 file, ±70 request), guard DB test + localhost, `npm run test:api` (2026-11-10; file akun 2026-11-15; guard privasi + unit jendela check-in 2026-11-17) |
 | S16 | Polling jadwal hemat (cache + versi + delta 304) | ✅ | `src/lib/slot-status.ts`, `GET /api/slots/status`, `getDaySchedule` 1 roundtrip, strip minggu 1 request (2026-11-10) |
 | S17 | Auth pemain email + password (ganti OTP) | ✅ | [ADR 0009](docs/06-adr/0009-akun-email-password.md): `/api/auth/register|login|logout|me`, `user_sessions` (token opaque + SHA-256), halaman `/login` + `/daftar`, sesi `padel_session` berbasis `userId` (2026-11-12) |
 | S18 | User bayangan walk-in + cron anonimisasi 7 hari | ✅ | [ADR 0011](docs/06-adr/0011-user-bayangan-walkin.md): `users.isGuest`, `anonymizedAt`, `/api/cron/anonymize`, dedupe guest by HP (2026-11-12) |
@@ -36,6 +36,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S23 | Rate-limit persisten lintas-instance | ✅ | [ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md): tabel `rate_limits`, migrasi `0005`, `src/lib/rate-limit-db.ts`; endpoint sensitif memakainya (2026-11-15) |
 | S24 | Jadwal cron produksi + CI | ✅ | `vercel.json` (`/api/cron/expire` tiap 5 mnt, `/api/cron/anonymize` harian 03:00 UTC), `.github/workflows/ci.yml` (2026-11-15) |
 | S25 | QR tiket asli + scanner kamera gate | ✅ | `qrcode.react` di `QRBox` (payload kode booking, level M); `jsqr` mendekode frame kamera di `/admin/scanner` (~8 fps, dedupe 8 dtk, pilih kamera, fallback manual) (2026-11-17) |
+| S26 | Jendela check-in hari-H + bunyi gate | ✅ | `src/lib/checkin-window.ts` (WIB, buka H-30 mnt, tutup saat sesi berakhir) dipakai `POST /api/admin/checkin` (409); scanner menampilkan pesan spesifik + tone sukses/gagal (bisa dimatikan) (2026-11-17) |
 
 ## Fitur MVP — Sisi Customer
 
@@ -129,6 +130,7 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - `GET /api/bookings/{code}` dikunci: wajib sesi, pemain hanya boleh membuka booking miliknya (403 bila bukan pemilik), admin boleh semua. Docs §5b.2 + OpenAPI ikut diperbarui.
 - Test guard privasi: booking tanpa sesi 401, pemain lain 403, tiket tanpa sesi 401, reset password user bayangan 409.
 - QR tiket asli (`qrcode.react`) + scanner kamera gate (`jsqr`) dengan dedupe, pilih kamera, dan fallback manual. Verifikasi izin/stream kamera tetap butuh uji manual di browser (tidak bisa diuji headless); `lint`/`typecheck`/`build` hijau.
+- Jendela check-in gate: hari-H, buka 30 menit sebelum jam pertama, tutup saat sesi terakhir berakhir (WIB); API menolak 409 dengan pesan spesifik. Bunyi gate sukses/gagal bisa diaktifkan/dimatikan.
 
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 
@@ -162,7 +164,15 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **57 test lulus (4 
 
 - **QR tiket:** `QRBox` memakai `qrcode.react` (`QRCodeCanvas`, level M, margin 2 modul) dengan payload kode booking — QR bisa dipindai aplikasi kamera biasa. `MOCK-QRIS:*` di `/booking` ikut jadi QR valid secara teknis (payload mock, bukan QRIS asli).
 - **Scanner gate:** `jsqr` mendekode frame `<video>` tiap ±120 ms (maks 640 px), auto-validasi ke `GET /api/tickets/:kode` lalu `POST /api/admin/checkin`; kode sama diabaikan 8 detik; pilih kamera via `enumerateDevices`; pesan jelas untuk izin ditolak / tanpa kamera / non-HTTPS.
-- **Batas uji:** izin & stream kamera tidak bisa diuji headless — perlu uji manual di browser (HTTPS atau `localhost`). Gate otomatis: `lint`, `typecheck`, `build` hijau; test API tidak terpengaruh (57 lulus sebelum perubahan UI).
+- **Batas uji:** izin & stream kamera tidak bisa diuji headless — perlu uji manual di browser (HTTPS atau `localhost`). Gate otomatis: `lint`, `typecheck`, `build` hijau.
+
+## Uji Jendela Check-in (2026-11-17)
+
+Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **67 test lulus (5 file).** `lint`, `typecheck`, `build` hijau.
+
+- **Unit (`05-checkin-window`, 8 test):** buka tepat H-30 menit; tolak 1 detik sebelum buka; terima saat sesi berjalan; tolak tepat saat sesi berakhir; tolak tanggal lain (`hari-H` / `sudah berakhir`); perhitungan WIB (10:00 UTC = 17:00 WIB belum dibuka); jam kosong/tanggal invalid; jam tidak berurutan memakai min/max.
+- **HTTP (`02-admin-flow`):** check-in booking +45 hari → 409 `hari-H`; walk-in hari ini pada slot kosong yang belum lewat → 200 + `checkedInBy`; check-in ganda → `already: true`. Jalur sukses dilewati otomatis bila tes dijalankan di luar jam operasional WIB.
+- **Scanner:** pesan 409 API diteruskan sebagai "Di luar jadwal check-in"; bunyi gate dua nada (lolos) / nada rendah (ditolak) dengan tombol aktif/nonaktif.
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 

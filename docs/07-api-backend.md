@@ -2,7 +2,7 @@
 
 > Referensi teknis untuk seluruh endpoint backend (`src/app/api/`).
 > Spesifikasi mesin-terbaca: [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) (impor ke Postman / Swagger UI).
-> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.3-privasi` (kunci detail booking 2026-11-17).**
+> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.4-checkin` (jendela check-in hari-H 2026-11-17).**
 > Source of truth implementasi tetap kode di `src/app/api/` + skema `src/db/schema.ts`.
 
 ## Isi Dokumen
@@ -539,6 +539,8 @@ Halaman `/tiket/[kode]` mengarahkan `401` ke `/login?next=/tiket/[kode]` dan men
 
 Hanya booking `terkonfirmasi`; idempoten (check-in ganda → `already: true`). **Perlu sesi admin.** Rate-limit 30/mnt per admin.
 
+Jendela check-in (WIB, UTC+7): hanya **hari-H**, dibuka **30 menit sebelum jam pertama** dan ditutup **tepat saat sesi terakhir berakhir**. Tiket tanggal lain atau di luar jam tersebut ditolak `409` dengan pesan spesifik (`... hanya pada hari-H`, `Check-in dibuka HH:MM WIB ...`, `Sesi ... sudah berakhir.`). Logika ada di `src/lib/checkin-window.ts`.
+
 ```bash
 curl -X POST http://localhost:3100/api/admin/checkin \
   -H 'Content-Type: application/json' -b cookies.txt \
@@ -562,6 +564,9 @@ curl -X POST http://localhost:3100/api/admin/checkin \
 | Body kurang | 400 | `code wajib diisi` |
 | Tidak ada | 404 | `Booking tidak ditemukan` |
 | Belum lunas/batal | 409 | `Hanya booking terkonfirmasi yang bisa check-in` |
+| Bukan hari-H | 409 | `Tiket ini untuk 2026-11-18; check-in hanya pada hari-H.` |
+| Terlalu awal | 409 | `Check-in dibuka 17:30 WIB (30 menit sebelum sesi 18:00–20:00 WIB).` |
+| Sesi berakhir | 409 | `Sesi 18:00–20:00 WIB sudah berakhir.` |
 
 ---
 
@@ -1070,6 +1075,7 @@ Ganti password mandiri (§5a.5, `/akun`, [ADR 0012](06-adr/0012-ganti-password-m
 | `1.1-auth` | 2026-11-12 | **Revisi scope:** §5a OTP → auth email+password (`/api/auth/register|login|logout|me`, reset admin); F6 + notifikasi dipensiunkan (§7c → `cron/anonymize`); `user_sessions` baru; `otp_codes` & `notification_logs` di-drop; rate-limit registrasi/login. Mengikuti ADR 0009–0011. |
 | `1.2-akun` | 2026-11-15 | **Akun + operasional:** sesi pemain pakai token acak + hash SHA-256 (bukan HMAC); `POST /api/auth/change-password` (§5a.5) + halaman `/akun`; `GET /api/admin/users` + `POST /api/admin/users/:id/reset-password` + halaman `/admin/users` (§7d); `GET /api/tickets/:kode` wajib login + pemilik (401/403, §5d.1); rate-limit endpoint sensitif pindah ke tabel Postgres `rate_limits`; jadwal Vercel Cron di `vercel.json` (§5c.4, §7c.1). Mengikuti ADR 0012–0013. |
 | `1.3-privasi` | 2026-11-17 | **Privasi booking:** `GET /api/bookings/:code` tidak lagi publik — wajib sesi, pemain hanya pemilik (401/403), admin boleh semua (§5b.2 + OpenAPI). Test guard privasi ditambah (tiket tanpa sesi 401, guest reset 409). |
+| `1.4-checkin` | 2026-11-17 | **Jendela check-in gate:** `POST /api/admin/checkin` hanya hari-H (WIB), buka 30 menit sebelum jam pertama, tutup saat sesi terakhir berakhir; di luar jendela → 409 dengan pesan spesifik (§5d.2 + OpenAPI). Logika `src/lib/checkin-window.ts`; unit test + HTTP 409/sukses. |
 
 ---
 

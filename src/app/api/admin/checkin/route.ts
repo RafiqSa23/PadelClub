@@ -1,14 +1,16 @@
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { bookings } from '@/db/schema';
+import { bookingSlots, bookings } from '@/db/schema';
 import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
+import { evaluateCheckinWindow } from '@/lib/checkin-window';
 import { rateLimitDb } from '@/lib/rate-limit-db';
 
 /**
  * Check-in oleh admin (F5): menandai pelanggan "sudah check-in" dari tiket.
  * Hanya admin bersesi — halaman tiket publik tidak boleh men-toggle sendiri.
  * Idempoten: check-in ganda mengembalikan `already: true`.
+ * Jendela: hari-H, dibuka 30 menit sebelum jam pertama, ditutup saat sesi berakhir.
  */
 export async function POST(request: Request) {
   const admin = await getCurrentAdmin();
@@ -40,6 +42,18 @@ export async function POST(request: Request) {
       },
       already: true,
     });
+  }
+
+  const slotRows = await db
+    .select({ hour: bookingSlots.hour })
+    .from(bookingSlots)
+    .where(eq(bookingSlots.bookingId, booking.id));
+  const window = evaluateCheckinWindow(
+    booking.bookingDate,
+    slotRows.map((row) => row.hour),
+  );
+  if (!window.allowed) {
+    return jsonError(window.reason ?? 'Di luar jadwal check-in', 409);
   }
 
   const now = new Date();

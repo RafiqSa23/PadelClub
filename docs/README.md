@@ -93,3 +93,4 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | 2026-11-15 | ADR 0012 ganti password mandiri; ADR 0013 rate-limit Postgres + Vercel Cron; halaman `/admin/users` (cari akun + reset password); migrasi `0005` tabel `rate_limits`; `vercel.json` cron expire/anonymize; CI GitHub Actions; docs API `1.2-akun` + OpenAPI disinkronkan. |
 | 2026-11-17 | Privasi booking: `GET /api/bookings/:code` wajib sesi + pemilik (401/403, admin boleh semua); test guard tiket 401/booking 403/guest reset 409; docs API `1.3-privasi` + OpenAPI disinkronkan. |
 | 2026-11-17 | QR tiket asli (`qrcode.react`) + scanner kamera gate (`jsqr`, dedupe 8 dtk, pilih kamera, fallback manual); F5 AC diperbarui. |
+| 2026-11-17 | Jendela check-in gate hari-H (WIB, H-30 mnt s/d sesi berakhir) di API + pesan scanner; bunyi gate sukses/gagal; docs API `1.4-checkin`. 67 test lulus (5 file). |

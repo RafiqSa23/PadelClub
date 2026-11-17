@@ -8,7 +8,7 @@ import { Toast } from "@/components/ui/Toast";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/cn";
-import { dateLabel, hourLabel, todayString } from "@/lib/format";
+import { dateLabel, hourLabel } from "@/lib/format";
 import type { BookingStatus, PaymentStatus } from "@/lib/types";
 
 type Mode = "camera" | "manual" | "log";
@@ -62,10 +62,12 @@ export default function AdminScannerPage() {
   const [cameraError, setCameraError] = useState<string | undefined>();
   const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
   const [deviceId, setDeviceId] = useState("");
+  const [soundOn, setSoundOn] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioRef = useRef<AudioContext | null>(null);
   const validatingRef = useRef(false);
   const lastScanRef = useRef<{ code: string; at: number } | null>(null);
   const validateRef = useRef<(raw: string) => Promise<void>>(async () => {});
@@ -82,11 +84,55 @@ export default function AdminScannerPage() {
     })} WIB`;
   }
 
+  /** Bunyi gate: dua nada naik saat lolos, nada rendah saat ditolak. */
+  function playGateTone(ok: boolean, force = false) {
+    if (!force && !soundOn) return;
+    const AudioCtor =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) return;
+
+    const ctx = audioRef.current ?? new AudioCtor();
+    audioRef.current = ctx;
+    if (ctx.state === "suspended") void ctx.resume();
+
+    const start = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(ok ? 0.25 : 0.18, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + (ok ? 0.32 : 0.26));
+
+    if (ok) {
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, start);
+      osc.frequency.setValueAtTime(1320, start + 0.12);
+      osc.start(start);
+      osc.stop(start + 0.34);
+    } else {
+      osc.type = "square";
+      osc.frequency.setValueAtTime(200, start);
+      osc.start(start);
+      osc.stop(start + 0.28);
+    }
+  }
+
+  // Tutup AudioContext saat halaman ditinggalkan.
+  useEffect(() => {
+    return () => {
+      void audioRef.current?.close();
+      audioRef.current = null;
+    };
+  }, []);
+
   function pushLog(entry: Omit<LogEntry, "id" | "time">) {
     setLog((previous) => [{ id: Date.now(), time: nowWib(), ...entry }, ...previous].slice(0, 20));
   }
 
   function deny(title: string, subtitle: string, ticket: ScannedTicket | undefined, note: string) {
+    playGateTone(false);
     setResult({ ok: false, title, subtitle, booking: ticket });
     pushLog({
       code: ticket?.code ?? input.trim(),
@@ -147,15 +193,6 @@ export default function AdminScannerPage() {
         );
         return;
       }
-      if (ticket.date < todayString()) {
-        deny(
-          "Jadwal telah lewat",
-          `Sesi ${dateLabel(ticket.date)} sudah berakhir.`,
-          ticket,
-          "Jadwal lewat",
-        );
-        return;
-      }
       if (ticket.checkedInAt) {
         deny("Sudah check-in", "Tiket ini sudah pernah discan sebelumnya.", ticket, "Duplikat scan");
         return;
@@ -173,6 +210,15 @@ export default function AdminScannerPage() {
         ticket?: { checkedInAt: string | null };
       };
       if (!checkJson.ok) {
+        if (checkRes.status === 409) {
+          deny(
+            "Di luar jadwal check-in",
+            checkJson.message ?? "Check-in hanya bisa pada hari-H sesuai jam sesi.",
+            ticket,
+            "Di luar jadwal",
+          );
+          return;
+        }
         deny("Check-in gagal", checkJson.message ?? "Coba lagi.", ticket, "Check-in gagal");
         return;
       }
@@ -197,6 +243,7 @@ export default function AdminScannerPage() {
         note: "Sukses masuk",
       });
       setToast(`Check-in ${checked.customerName ?? checked.code} berhasil.`);
+      playGateTone(true);
     } catch {
       setResult({
         ok: false,
@@ -572,11 +619,24 @@ export default function AdminScannerPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setToast("Suara beep gate dipilih.")}
-                  className="flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl bg-surface-container-low p-4 text-center text-label-sm font-semibold text-on-surface transition-all hover:bg-surface-container-high"
+                  onClick={() => {
+                    const next = !soundOn;
+                    setSoundOn(next);
+                    if (next) playGateTone(true, true);
+                    setToast(next ? "Suara gate diaktifkan." : "Suara gate dimatikan.");
+                  }}
+                  className={cn(
+                    "flex min-h-24 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl p-4 text-center text-label-sm font-semibold transition-all",
+                    soundOn
+                      ? "bg-court-grass-light text-court-green-deep hover:bg-court-grass-light/70"
+                      : "bg-surface-container-low text-slate-whisper hover:bg-surface-container-high",
+                  )}
                 >
-                  <MIcon name="volume_up" className="text-[24px] text-tertiary" />
-                  Pilih Suara Beep / Gate Chime
+                  <MIcon
+                    name={soundOn ? "volume_up" : "volume_off"}
+                    className="text-[24px] text-tertiary"
+                  />
+                  {soundOn ? "Suara Gate Aktif (klik tes)" : "Suara Gate Nonaktif"}
                 </button>
               </div>
             </div>

@@ -95,6 +95,8 @@
   - Tiket hanya bisa dibuka pemiliknya (sesi `padel_session` cocok `booking.userId`) atau admin bersesi; tanpa login → diarahkan ke `/login`, pemain lain → pesan "bukan pemilik tiket". Tiket selalu tersedia di `/riwayat` akun pemesan.
   - Tiket menampilkan QR asli yang bisa dipindai (payload = kode booking; level koreksi M).
   - Scanner gate (`/admin/scanner`) memakai kamera perangkat untuk mendekode QR otomatis (jsQR, ~8 fps), memvalidasi tiket, lalu check-in via `POST /api/admin/checkin`. Kode yang sama diabaikan 8 detik agar tidak spam; input manual tetap tersedia.
+  - Check-in hanya pada **hari-H**: dibuka 30 menit sebelum jam pertama dan ditutup tepat saat sesi terakhir berakhir (WIB). Di luar jendela → 409 dengan pesan spesifik (`src/lib/checkin-window.ts`).
+  - Scanner memberi bunyi gate (dua nada naik saat lolos, nada rendah saat ditolak) dan tombol aktif/nonaktif suara.
   - Kamera butuh HTTPS atau `localhost` dan izin browser; bila ditolak/tidak ada kamera, scanner menampilkan pesan jelas dan validasi manual tetap bisa dipakai.
   - Admin dapat menandai pelanggan "sudah check-in" dari halaman tiket.
   - Tiket berstatus `Batal`/`Tutup` menampilkan pemberitahuan jelas bila dilihat.

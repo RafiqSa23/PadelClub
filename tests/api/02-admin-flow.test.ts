@@ -19,6 +19,7 @@ const admin = apiClient();
 let courtId = 0;
 let hour = 0;
 let walkinCode = "";
+let sameDayCode = "";
 let closureId = 0;
 
 beforeAll(async () => {
@@ -99,16 +100,56 @@ describe("alur admin (F7–F11)", () => {
     walkinCode = res.body.booking.code;
   });
 
-  it("check-in tiket oleh admin (F5)", async () => {
-    const res = await admin.post<{ ticket: { checkedInBy: string | null } }>("/api/admin/checkin", {
+  it("check-in tiket di luar hari-H ditolak 409", async () => {
+    const res = await admin.post<{ ok: boolean; message: string }>("/api/admin/checkin", {
       code: walkinCode,
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.message).toContain("hari-H");
+  });
+
+  it("walk-in hari ini siap check-in dalam jendela", async () => {
+    const wibToday = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const nowWibHour = new Date(Date.now() + 7 * 60 * 60 * 1000).getUTCHours();
+    const schedule = await admin.get<{
+      schedule: { slots: { courtId: number; hour: number; status: string }[] };
+    }>(`/api/admin/schedule?date=${wibToday}`);
+    const upcoming = schedule.body.schedule.slots.find(
+      (slot) => slot.status === "kosong" && slot.hour >= nowWibHour && slot.hour < 23,
+    );
+    if (!upcoming) {
+      // Tes dijalankan mendekati/di luar jam operasional WIB — jalur sukses
+      // check-in dilewati; jendela tetap diuji unit test 05-checkin-window.
+      return;
+    }
+
+    const created = await admin.post<{ booking: { code: string } }>("/api/admin/bookings", {
+      courtId: upcoming.courtId,
+      date: wibToday,
+      hours: [upcoming.hour],
+      name: "Tes Checkin Hari Ini",
+      phone: TEST_PHONE_WALKIN,
+      paid: true,
+    });
+    expect(created.status).toBe(201);
+    sameDayCode = created.body.booking.code;
+  });
+
+  it("check-in tiket oleh admin (F5)", async () => {
+    if (!sameDayCode) return; // tidak ada slot tersisa hari ini
+    const res = await admin.post<{ ticket: { checkedInBy: string | null } }>("/api/admin/checkin", {
+      code: sameDayCode,
     });
     expect(res.status).toBe(200);
     expect(res.body.ticket.checkedInBy).toBeTruthy();
   });
 
   it("check-in ganda idempoten", async () => {
-    const res = await admin.post<{ already?: boolean }>("/api/admin/checkin", { code: walkinCode });
+    if (!sameDayCode) return;
+    const res = await admin.post<{ already?: boolean }>("/api/admin/checkin", {
+      code: sameDayCode,
+    });
     expect(res.status).toBe(200);
     expect(res.body.already).toBe(true);
   });

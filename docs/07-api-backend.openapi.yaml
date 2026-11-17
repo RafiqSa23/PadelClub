@@ -1,13 +1,13 @@
 openapi: 3.1.0
 info:
   title: Padel Court Booking — Backend API
-  version: 1.2-akun
+  version: 1.4-checkin
   description: >-
     API backend Sistem Penyewaan Lapangan Padel (Next.js Route Handlers +
     Drizzle ORM + Neon PostgreSQL). Dokumen manusia: docs/07-api-backend.md.
-    Versi 1.2-akun = revisi akun + operasional 2026-11-15 (ADR 0012–0013):
-    ganti password mandiri, reset password admin via /admin/users, tiket wajib
-    login + pemilik, rate-limit persisten (tabel rate_limits), cron Vercel.
+    Versi 1.4-checkin = revisi 2026-11-17: detail booking wajib sesi/pemilik,
+    jendela check-in hari-H (WIB, H-30 menit s/d sesi berakhir). Sebelumnya
+    1.2-akun = akun + operasional 2026-11-15 (ADR 0012–0013).
 summary: API backend MVP Padel Court Booking
 servers:
   - url: /api
@@ -1534,10 +1534,14 @@ paths:
   /admin/checkin:
     post:
       tags: [Tiket]
-      summary: Check-in booking oleh admin — idempoten (F5)
+      summary: Check-in booking oleh admin — idempoten, hanya hari-H (F5)
       operationId: adminCheckin
       security:
         - cookieAuth: []
+      description: >-
+        Hanya booking terkonfirmasi. Idempoten (ganda → already: true). Jendela
+        check-in memakai WIB: hari-H, dibuka 30 menit sebelum jam pertama, ditutup
+        tepat saat sesi terakhir berakhir. Di luar jendela → 409.
       requestBody:
         required: true
         content:
@@ -1588,7 +1592,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Bukan booking terkonfirmasi
+          description: Bukan booking terkonfirmasi, atau di luar jendela check-in (hari-H / 30 menit sebelum sesi / sesi berakhir)
           content:
             application/json:
               schema:
