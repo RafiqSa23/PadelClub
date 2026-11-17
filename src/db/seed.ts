@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { db } from './index';
-import { admins, courtHours, courts } from './schema';
+import { admins, courtHours, courts, users } from './schema';
 import { hashAdminPassword } from '../lib/admin-auth';
+import { MIN_PASSWORD_LENGTH, hashPassword } from '../lib/password';
+import { normalizePhone } from '../lib/phone';
 
 const COURTS = [
   { name: 'Lapangan 1', hourlyPrice: 35000, isIndoor: false, description: 'Outdoor, pasir sintetis' },
@@ -23,6 +25,14 @@ const HOURS: Record<number, { open: string; close: string }> = {
   5: { open: '09:00', close: '21:00' },
   6: { open: '07:00', close: '23:00' },
 };
+
+// Akun pemain demo untuk login lewat /login (bukan user bayangan walk-in).
+// Email sengaja berbeda dari akun test (pemain-test@…) supaya cleanup test
+// tidak menghapus baris seed.
+const DEMO_USERS = [
+  { name: 'Pemain Demo', email: 'pemain@padelclub.test', phone: '081234567890' },
+  { name: 'Pemain Demo 2', email: 'pemain2@padelclub.test', phone: '081234567891' },
+] as const;
 
 async function main() {
   // Courts (idempotent by name).
@@ -80,6 +90,43 @@ async function main() {
     console.log(`seed admin: ${username} OK`);
   } else {
     console.log(`seed admin: ${username} sudah ada, dilewati`);
+  }
+
+  // Akun pemain demo (login email + password, ADR 0009). Idempotent by email;
+  // password hanya ditimpa bila SEED_DEMO_RESET_PASSWORD=1.
+  const demoPassword = process.env.SEED_DEMO_PASSWORD ?? 'pemain123';
+  if (demoPassword.length < MIN_PASSWORD_LENGTH) {
+    console.error(`seed user gagal: SEED_DEMO_PASSWORD minimal ${MIN_PASSWORD_LENGTH} karakter`);
+    process.exit(1);
+  }
+  const resetDemoPassword = process.env.SEED_DEMO_RESET_PASSWORD === '1';
+
+  for (const demo of DEMO_USERS) {
+    const email = demo.email.trim().toLowerCase();
+    const foundUser = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (foundUser.length === 0) {
+      await db.insert(users).values({
+        name: demo.name,
+        email,
+        phone: normalizePhone(demo.phone),
+        passwordHash: await hashPassword(demoPassword),
+        isGuest: false,
+      });
+      console.log(`seed user: ${email} OK`);
+    } else if (resetDemoPassword) {
+      await db
+        .update(users)
+        .set({ passwordHash: await hashPassword(demoPassword), updatedAt: new Date() })
+        .where(eq(users.id, foundUser[0].id));
+      console.log(`seed user: ${email} password direset`);
+    } else {
+      console.log(`seed user: ${email} sudah ada, dilewati`);
+    }
   }
 
   process.exit(0);

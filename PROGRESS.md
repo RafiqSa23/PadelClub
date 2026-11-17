@@ -245,6 +245,7 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 ## Catatan Operasional
 
 - **DB:** isi `DATABASE_URL` (Neon) di `.env` terlebih dahulu. Jangan commit `.env`.
+- **Akun demo:** `npm run db:seed` membuat admin (`SEED_ADMIN_USER`/`SEED_ADMIN_PASSWORD`, default `admin`/`admin123`) + 2 pemain: `pemain@padelclub.test` dan `pemain2@padelclub.test`, password `SEED_DEMO_PASSWORD` (default `pemain123`). Idempotent by email; `SEED_DEMO_RESET_PASSWORD=1` memaksa timpa hash. Login lewat `/login` (cookie `padel_session`).
 - Perintah: `npm run dev` · `npm run lint` · `npm run typecheck` · `npm run build` · `npm run db:generate` · `npm run db:migrate` · `npm run db:studio`.
 - Koridor keputusan: baca `docs/06-adr/` sebelum mengubah area yang sudah dikunci.
 - Visual: seluruh halaman mengikuti desain sistem yang disetujui; token warna/tipografi di `src/app/globals.css` (ringkas di [`docs/DESIGN.md`](docs/DESIGN.md)).

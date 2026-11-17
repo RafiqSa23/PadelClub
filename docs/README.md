@@ -100,3 +100,4 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | 2026-11-17 | Jendela check-in gate hari-H (WIB, H-30 mnt s/d sesi berakhir) di API + pesan scanner; bunyi gate sukses/gagal; docs API `1.4-checkin`. 67 test lulus (5 file). |
 | 2026-11-17 | ADR 0014: QR tiket bertanda tangan HMAC (TTL 5 mnt, `TICKET_QR_SECRET`) + verifikasi `?qr=` + log pemindaian persist (`scan_logs`, `GET /api/admin/scans`); migrasi `0006`; docs API `1.5-qr`. |
 | 2026-11-17 | ADR 0015: header keamanan global (CSP terbatas, `nosniff`, `DENY`, referrer/permissions policy, HSTS produksi, tanpa `X-Powered-By`) + retensi `scan_logs` 90 hari (`SCAN_LOG_RETENTION_DAYS`, cron anonimisasi); docs API `1.6-hardening`. |
+| 2026-11-18 | Seed akun pemain demo: `pemain@padelclub.test` + `pemain2@padelclub.test` (password `SEED_DEMO_PASSWORD`, idempotent, `SEED_DEMO_RESET_PASSWORD`), bisa langsung login lewat `/login`. |
