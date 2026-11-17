@@ -92,3 +92,4 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | 2026-11-13 | Hardening auth: tiket `/tiket/:kode` **wajib login + pemilik** (API 401/403, halaman redirect `/login`), hapus tautan Admin Portal dari navbar publik, sesi pemain **token acak + hash SHA-256** (bukan HMAC), halaman `/akun` + ganti password. |
 | 2026-11-15 | ADR 0012 ganti password mandiri; ADR 0013 rate-limit Postgres + Vercel Cron; halaman `/admin/users` (cari akun + reset password); migrasi `0005` tabel `rate_limits`; `vercel.json` cron expire/anonymize; CI GitHub Actions; docs API `1.2-akun` + OpenAPI disinkronkan. |
 | 2026-11-17 | Privasi booking: `GET /api/bookings/:code` wajib sesi + pemilik (401/403, admin boleh semua); test guard tiket 401/booking 403/guest reset 409; docs API `1.3-privasi` + OpenAPI disinkronkan. |
+| 2026-11-17 | QR tiket asli (`qrcode.react`) + scanner kamera gate (`jsqr`, dedupe 8 dtk, pilih kamera, fallback manual); F5 AC diperbarui. |

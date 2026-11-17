@@ -93,6 +93,9 @@
 - **Kriteria Terima (AC):**
   - Tiket memuat: kode unik, nama&HP pemesan, lapangan, tanggal, jam, durasi, total harga, status.
   - Tiket hanya bisa dibuka pemiliknya (sesi `padel_session` cocok `booking.userId`) atau admin bersesi; tanpa login → diarahkan ke `/login`, pemain lain → pesan "bukan pemilik tiket". Tiket selalu tersedia di `/riwayat` akun pemesan.
+  - Tiket menampilkan QR asli yang bisa dipindai (payload = kode booking; level koreksi M).
+  - Scanner gate (`/admin/scanner`) memakai kamera perangkat untuk mendekode QR otomatis (jsQR, ~8 fps), memvalidasi tiket, lalu check-in via `POST /api/admin/checkin`. Kode yang sama diabaikan 8 detik agar tidak spam; input manual tetap tersedia.
+  - Kamera butuh HTTPS atau `localhost` dan izin browser; bila ditolak/tidak ada kamera, scanner menampilkan pesan jelas dan validasi manual tetap bisa dipakai.
   - Admin dapat menandai pelanggan "sudah check-in" dari halaman tiket.
   - Tiket berstatus `Batal`/`Tutup` menampilkan pemberitahuan jelas bila dilihat.
   - Tidak ada tiket yang dikirim otomatis ke kanal eksternal (ditunda v2.0, [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).

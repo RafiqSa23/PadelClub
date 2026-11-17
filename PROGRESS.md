@@ -35,6 +35,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S22 | Halaman admin akun pemain + reset password | ✅ | `/admin/users`, `GET /api/admin/users?q=`, `POST /api/admin/users/:id/reset-password` (2026-11-15) |
 | S23 | Rate-limit persisten lintas-instance | ✅ | [ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md): tabel `rate_limits`, migrasi `0005`, `src/lib/rate-limit-db.ts`; endpoint sensitif memakainya (2026-11-15) |
 | S24 | Jadwal cron produksi + CI | ✅ | `vercel.json` (`/api/cron/expire` tiap 5 mnt, `/api/cron/anonymize` harian 03:00 UTC), `.github/workflows/ci.yml` (2026-11-15) |
+| S25 | QR tiket asli + scanner kamera gate | ✅ | `qrcode.react` di `QRBox` (payload kode booking, level M); `jsqr` mendekode frame kamera di `/admin/scanner` (~8 fps, dedupe 8 dtk, pilih kamera, fallback manual) (2026-11-17) |
 
 ## Fitur MVP — Sisi Customer
 
@@ -93,7 +94,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | `/admin/laporan` | Rekap pendapatan & okupansi | ✅ | Real: `GET /api/admin/reports` (JSON ringkasan + per lapangan) + unduh CSV server-side |
 | `/admin/papan-jadwal` | Papan jadwal publik (mode TV/lobi) | ✅ | Real read-only: `GET /api/admin/schedule` + refresh 15 dtk + nama tersamar; tanpa aksi · di luar sitemap PRD |
 | `/admin/monitoring` | Monitoring web publik + banner siaran | ✅ | Demo statis (`src/lib/mock-data`) — log notifikasi sudah dihapus karena ADR 0010; panel demo dilabeli jelas · di luar sitemap PRD |
-| `/admin/scanner` | Scanner tiket di gate (kamera/manual) | ✅ | Real: validasi via `GET /api/tickets/:kode` + check-in via `POST /api/admin/checkin`; kamera hanya pratinjau (validasi via input manual); log shift in-memory · di luar sitemap PRD |
+| `/admin/scanner` | Scanner tiket di gate (kamera/manual) | ✅ | Real: kamera `getUserMedia` + decode QR `jsqr` (otomatis validasi) via `GET /api/tickets/:kode` + check-in `POST /api/admin/checkin`; pilih kamera asli; fallback input manual; log shift in-memory · di luar sitemap PRD |
 
 ## Sisa Pekerjaan (Belum Dikerjakan)
 
@@ -122,12 +123,12 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 **P2 — setelah MVP stabil**
 - `/admin/monitoring` masih demo statis (`src/lib/mock-data`); belum ada feed monitoring real (di luar sitemap PRD).
 - **Reset lupa password mandiri** dan verifikasi email belum ada (PRD Q7). Reset tetap via `/admin/users`; ganti password hanya saat sudah login (ADR 0012).
-- Scanner kamera gate hanya pratinjau; validasi tiket via input manual (`/admin/scanner`).
 - Rate-limit DB: belum ada test lintas-instance; pembersihan baris `rate_limits` hanya menumpang `/api/cron/expire`.
 
 **Selesai 2026-11-17:**
 - `GET /api/bookings/{code}` dikunci: wajib sesi, pemain hanya boleh membuka booking miliknya (403 bila bukan pemilik), admin boleh semua. Docs §5b.2 + OpenAPI ikut diperbarui.
 - Test guard privasi: booking tanpa sesi 401, pemain lain 403, tiket tanpa sesi 401, reset password user bayangan 409.
+- QR tiket asli (`qrcode.react`) + scanner kamera gate (`jsqr`) dengan dedupe, pilih kamera, dan fallback manual. Verifikasi izin/stream kamera tetap butuh uji manual di browser (tidak bisa diuji headless); `lint`/`typecheck`/`build` hijau.
 
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 
@@ -156,6 +157,12 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **57 test lulus (4 
 - **Tiket:** tanpa sesi 401 (sebelum lookup kode); kode asing via sesi admin tetap 404.
 - **Admin users:** reset password user bayangan (`isGuest`) 409; alur walk-in membuat user bayangan seperti sebelumnya.
 - **Anggaran request:** naik dari ±60 ke ±70 per run (file `03-guards` 15, `04-account` 18).
+
+## Uji QR & Scanner Kamera (2026-11-17)
+
+- **QR tiket:** `QRBox` memakai `qrcode.react` (`QRCodeCanvas`, level M, margin 2 modul) dengan payload kode booking — QR bisa dipindai aplikasi kamera biasa. `MOCK-QRIS:*` di `/booking` ikut jadi QR valid secara teknis (payload mock, bukan QRIS asli).
+- **Scanner gate:** `jsqr` mendekode frame `<video>` tiap ±120 ms (maks 640 px), auto-validasi ke `GET /api/tickets/:kode` lalu `POST /api/admin/checkin`; kode sama diabaikan 8 detik; pilih kamera via `enumerateDevices`; pesan jelas untuk izin ditolak / tanpa kamera / non-HTTPS.
+- **Batas uji:** izin & stream kamera tidak bisa diuji headless — perlu uji manual di browser (HTTPS atau `localhost`). Gate otomatis: `lint`, `typecheck`, `build` hijau; test API tidak terpengaruh (57 lulus sebelum perubahan UI).
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 

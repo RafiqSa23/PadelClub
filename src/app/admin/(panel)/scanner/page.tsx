@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import jsQR from "jsqr";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { MIcon } from "@/components/ui/MIcon";
 import { Toast } from "@/components/ui/Toast";
@@ -11,6 +12,7 @@ import { dateLabel, hourLabel, todayString } from "@/lib/format";
 import type { BookingStatus, PaymentStatus } from "@/lib/types";
 
 type Mode = "camera" | "manual" | "log";
+type CameraState = "idle" | "live" | "denied" | "unavailable" | "error";
 
 interface ScannedTicket {
   code: string;
@@ -42,6 +44,13 @@ interface ScanResult {
   booking?: ScannedTicket;
 }
 
+/** Terima kode polos atau URL tiket (`/tiket/PD-XXXXXX`). */
+function extractCode(payload: string) {
+  const trimmed = payload.trim();
+  const fromUrl = trimmed.match(/\/tiket\/([A-Za-z0-9-]+)/);
+  return (fromUrl?.[1] ?? trimmed).replace(/^#/, "").toUpperCase();
+}
+
 export default function AdminScannerPage() {
   const [mode, setMode] = useState<Mode>("camera");
   const [input, setInput] = useState("");
@@ -49,6 +58,17 @@ export default function AdminScannerPage() {
   const [validating, setValidating] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [toast, setToast] = useState<string | undefined>();
+  const [cameraState, setCameraState] = useState<CameraState>("idle");
+  const [cameraError, setCameraError] = useState<string | undefined>();
+  const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
+  const [deviceId, setDeviceId] = useState("");
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const validatingRef = useRef(false);
+  const lastScanRef = useRef<{ code: string; at: number } | null>(null);
+  const validateRef = useRef<(raw: string) => Promise<void>>(async () => {});
 
   const failedCount = log.filter((entry) => !entry.ok).length;
   const successCount = log.filter((entry) => entry.ok).length;
@@ -78,7 +98,7 @@ export default function AdminScannerPage() {
   }
 
   async function validate(raw: string) {
-    const code = raw.trim().replace(/^#/, "").toUpperCase();
+    const code = extractCode(raw);
     if (!code) {
       setResult({
         ok: false,
@@ -88,6 +108,7 @@ export default function AdminScannerPage() {
       return;
     }
 
+    validatingRef.current = true;
     setValidating(true);
     try {
       const res = await fetch(`/api/tickets/${encodeURIComponent(code)}`, {
@@ -183,9 +204,126 @@ export default function AdminScannerPage() {
         subtitle: "Tidak dapat terhubung ke server.",
       });
     } finally {
+      validatingRef.current = false;
       setValidating(false);
     }
   }
+
+  // Simpan fungsi validate terbaru supaya loop kamera tidak memakai closure basi.
+  useEffect(() => {
+    validateRef.current = validate;
+  });
+
+  // Nyalakan/matikan kamera sesuai mode + kamera yang dipilih.
+  useEffect(() => {
+    if (mode !== "camera") return;
+    let cancelled = false;
+    const video = videoRef.current;
+
+    async function start() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          if (cancelled) return;
+          setCameraState("unavailable");
+          setCameraError("Browser tidak mendukung kamera. Butuh HTTPS atau localhost.");
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: deviceId
+            ? { deviceId: { exact: deviceId } }
+            : { facingMode: { ideal: "environment" } },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (video) {
+          video.srcObject = stream;
+          await video.play().catch(() => {});
+        }
+        if (cancelled) return;
+        setCameraState("live");
+        setCameraError(undefined);
+
+        const list = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+        if (cancelled) return;
+        setCameras(
+          list
+            .filter((item) => item.kind === "videoinput")
+            .map((item, index) => ({
+              id: item.deviceId,
+              label: item.label || `Kamera ${index + 1}`,
+            })),
+        );
+      } catch (error) {
+        if (cancelled) return;
+        const name = error instanceof DOMException ? error.name : "";
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          setCameraState("denied");
+          setCameraError("Izin kamera ditolak. Aktifkan izin kamera di browser lalu muat ulang.");
+        } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+          setCameraState("unavailable");
+          setCameraError("Kamera tidak ditemukan. Gunakan input manual.");
+        } else {
+          setCameraState("error");
+          setCameraError("Kamera gagal dimulai. Gunakan input manual.");
+        }
+      }
+    }
+
+    void start();
+
+    return () => {
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      if (video) video.srcObject = null;
+    };
+  }, [mode, deviceId]);
+
+  // Decode frame kamera ~8 fps; kode sama diabaikan 8 detik supaya tidak spam.
+  useEffect(() => {
+    if (mode !== "camera" || cameraState !== "live") return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    let frame = 0;
+    let lastDecode = 0;
+
+    const tick = (now: number) => {
+      frame = requestAnimationFrame(tick);
+      if (now - lastDecode < 120 || validatingRef.current) return;
+      lastDecode = now;
+      if (!video.videoWidth || !video.videoHeight) return;
+
+      const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const found = jsQR(image.data, image.width, image.height, {
+        inversionAttempts: "dontInvert",
+      });
+      if (!found) return;
+
+      const code = extractCode(found.data);
+      if (!code) return;
+      const previous = lastScanRef.current;
+      const at = Date.now();
+      if (previous && previous.code === code && at - previous.at < 8000) return;
+      lastScanRef.current = { code, at };
+      setInput(code);
+      void validateRef.current(code);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [cameraState, mode]);
 
   const court = result?.booking ? { name: result.booking.courtName ?? "—" } : undefined;
 
@@ -194,6 +332,23 @@ export default function AdminScannerPage() {
     { key: "manual", icon: "keyboard", label: "Input Manual" },
     { key: "log", icon: "history", label: "Log Riwayat" },
   ];
+
+  const cameraTitle =
+    cameraState === "live"
+      ? "Arahkan QR tiket ke bingkai"
+      : cameraState === "denied"
+        ? "Izin kamera ditolak"
+        : cameraState === "unavailable"
+          ? "Kamera tidak tersedia"
+          : cameraState === "error"
+            ? "Kamera gagal dimulai"
+            : "Menyiapkan kamera…";
+  const cameraHint =
+    cameraState === "live"
+      ? "Pemindaian otomatis — tidak perlu menekan tombol."
+      : cameraState === "idle"
+        ? "Izinkan akses kamera saat browser meminta."
+        : cameraError;
 
   return (
     <AdminShell title="Scanner Tiket">
@@ -261,58 +416,102 @@ export default function AdminScannerPage() {
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
           {/* Kiri */}
           <div className="flex min-w-0 flex-col gap-6 lg:col-span-6">
-            {mode !== "log" && (
+            {mode === "camera" && (
               <div className="overflow-hidden rounded-2xl bg-field-white shadow-sm">
-                <div className="flex items-center justify-between bg-court-grass-light/40 px-5 py-3">
+                <div className="flex items-center justify-between gap-3 bg-court-grass-light/40 px-5 py-3">
                   <div className="flex items-center gap-2 text-court-green-deep">
                     <MIcon name="videocam" className="text-[20px]" />
                     <span className="text-label-md font-bold">Viewport Scanner Optik</span>
-                    <span className="rounded-full bg-mist-shadow px-2 py-0.5 text-label-sm font-bold text-slate-whisper">
-                      Pratinjau — validasi via input manual
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-label-sm font-bold",
+                        cameraState === "live"
+                          ? "bg-court-green-deep text-field-white"
+                          : "bg-mist-shadow text-slate-whisper",
+                      )}
+                    >
+                      {cameraState === "live" ? "Kamera aktif — pindai otomatis" : "Kamera nonaktif"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
+                    <span
+                      className={cn(
+                        "h-2 w-2 rounded-full",
+                        cameraState === "live" ? "animate-pulse bg-primary" : "bg-slate-whisper",
+                      )}
+                    />
                     <select
                       aria-label="Pilih kamera"
-                      className="cursor-pointer rounded-lg bg-field-white px-2 py-1 text-label-sm text-on-surface shadow-sm outline-none"
+                      value={deviceId}
+                      onChange={(event) => setDeviceId(event.target.value)}
+                      disabled={cameras.length === 0}
+                      className="max-w-52 cursor-pointer truncate rounded-lg bg-field-white px-2 py-1 text-label-sm text-on-surface shadow-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <option>Kamera: HD Webcam Front Desk #1</option>
-                      <option>Kamera: Gate Turnstile Overhead Cam</option>
-                      <option>USB Barcode Scanner Direct HID</option>
+                      <option value="">Kamera default</option>
+                      {cameras.map((camera) => (
+                        <option key={camera.id} value={camera.id}>
+                          {camera.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
 
                 <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-inverse-surface">
-                  <div className="absolute inset-0 bg-gradient-to-b from-inverse-surface via-on-surface to-inverse-surface opacity-90" />
-                  <div className="absolute inset-x-0 top-0 h-1 animate-pulse bg-gradient-to-r from-transparent via-primary-fixed to-transparent" />
-                  <div className="relative flex h-64 w-64 items-center justify-center sm:h-72 sm:w-72">
-                    <span className="absolute left-0 top-0 h-8 w-8 rounded-tl-xl shadow-[-2px_-2px_0_0_var(--color-primary-fixed-dim)]" />
-                    <span className="absolute right-0 top-0 h-8 w-8 rounded-tr-xl shadow-[2px_-2px_0_0_var(--color-primary-fixed-dim)]" />
-                    <span className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-xl shadow-[-2px_2px_0_0_var(--color-primary-fixed-dim)]" />
-                    <span className="absolute bottom-0 right-0 h-8 w-8 rounded-br-xl shadow-[2px_2px_0_0_var(--color-primary-fixed-dim)]" />
-                    <div className="absolute inset-4 flex flex-col items-center justify-center gap-3 rounded-lg bg-court-grass-light/5 p-4 text-center backdrop-blur-[1px]">
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    aria-label="Pratinjau kamera scanner"
+                    className={cn(
+                      "h-full w-full object-cover transition-opacity",
+                      cameraState === "live" ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+
+                  {cameraState !== "live" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
                       <span className="flex h-16 w-16 items-center justify-center rounded-full bg-field-white/10 text-primary-fixed">
-                        <MIcon name="qr_code_scanner" className="animate-pulse text-[34px]" />
+                        <MIcon
+                          name={cameraState === "denied" ? "videocam_off" : "qr_code_scanner"}
+                          className="text-[34px]"
+                        />
                       </span>
-                      <div className="flex flex-col gap-1">
+                      <div className="flex max-w-sm flex-col gap-1">
                         <span className="text-label-md font-semibold text-field-white">
-                          Arahkan QR code tiket ke kamera
+                          {cameraTitle}
                         </span>
-                        <span className="text-body-sm text-slate-whisper">
-                          Ponsel pemain atau gelang barcode match
-                        </span>
+                        <span className="text-body-sm text-slate-whisper">{cameraHint}</span>
                       </div>
                     </div>
-                    <span className="absolute inset-x-2 top-1/2 h-0.5 animate-bounce bg-primary-fixed/80" />
-                  </div>
-                  <div className="absolute inset-x-4 bottom-4 flex items-center justify-between rounded-lg bg-inverse-surface/85 px-4 py-1.5 backdrop-blur-md">
-                    <div className="flex items-center gap-2">
-                      <MIcon name="check_circle" className="text-[18px] text-primary-fixed" />
-                      <span className="text-label-sm text-field-white">Deteksi QR cepat siap</span>
+                  )}
+
+                  {cameraState === "live" && (
+                    <div className="pointer-events-none absolute flex h-64 w-64 items-center justify-center sm:h-72 sm:w-72">
+                      <span className="absolute left-0 top-0 h-8 w-8 rounded-tl-xl shadow-[-2px_-2px_0_0_var(--color-primary-fixed-dim)]" />
+                      <span className="absolute right-0 top-0 h-8 w-8 rounded-tr-xl shadow-[2px_-2px_0_0_var(--color-primary-fixed-dim)]" />
+                      <span className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-xl shadow-[-2px_2px_0_0_var(--color-primary-fixed-dim)]" />
+                      <span className="absolute bottom-0 right-0 h-8 w-8 rounded-br-xl shadow-[2px_2px_0_0_var(--color-primary-fixed-dim)]" />
+                      <span className="absolute inset-x-2 top-1/2 h-0.5 animate-bounce bg-primary-fixed/80" />
                     </div>
-                    <span className="text-data-tabular text-primary-fixed">LATENSI: 18ms</span>
+                  )}
+
+                  <canvas ref={canvasRef} className="hidden" aria-hidden />
+
+                  <div className="absolute inset-x-4 bottom-4 flex items-center justify-between gap-3 rounded-lg bg-inverse-surface/85 px-4 py-1.5 backdrop-blur-md">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <MIcon
+                        name={cameraState === "live" ? "check_circle" : "info"}
+                        className="text-[18px] text-primary-fixed"
+                      />
+                      <span className="truncate text-label-sm text-field-white">
+                        {cameraState === "live" ? "Pemindaian QR otomatis" : "Pakai input manual bila kamera gagal"}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-data-tabular text-primary-fixed">
+                      {cameraState === "live" ? "LIVE" : "OFFLINE"}
+                    </span>
                   </div>
                 </div>
               </div>
