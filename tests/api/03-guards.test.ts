@@ -43,6 +43,12 @@ describe("guard & validasi API", () => {
     expect(res.body.ok).toBe(false);
   });
 
+  it("tiket tanpa sesi ditolak 401", async () => {
+    const res = await anonymous.get<{ ok: boolean }>("/api/tickets/PD-TIDAK-ADA");
+    expect(res.status).toBe(401);
+    expect(res.body.ok).toBe(false);
+  });
+
   it("tiket dengan kode asing 404 (setelah login admin)", async () => {
     await requireServer();
     const admin = apiClient();
@@ -129,6 +135,6 @@ describe("guard & validasi API", () => {
   });
 
   it("jumlah request tetap di bawah anggaran", () => {
-    expect(requestCountSoFar()).toBeLessThanOrEqual(13);
+    expect(requestCountSoFar()).toBeLessThanOrEqual(15);
   });
 });

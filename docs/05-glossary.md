@@ -35,7 +35,7 @@ Glossary berisi istilah yang dipakai konsisten di seluruh dokumen produk.
 ## K
 | Istilah | Definisi |
 |---|---|
-| **Kode Booking (Tiket)** | Kode unik pada tiket untuk akses detail booking tanpa login. |
+| **Kode Booking (Tiket)** | Kode unik pada tiket untuk membuka detail booking; wajib sesi pemilik atau admin. |
 
 ## L
 | Istilah | Definisi |

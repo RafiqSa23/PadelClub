@@ -485,8 +485,14 @@ paths:
   /bookings/{code}:
     get:
       tags: [Pelanggan–Booking]
-      summary: Detail booking via kode (publik, untuk konfirmasi & tiket)
+      summary: Detail booking via kode — wajib sesi, hanya pemilik atau admin
       operationId: getBooking
+      security:
+        - customerCookie: []
+        - cookieAuth: []
+      description: >-
+        Pelanggan hanya boleh membuka booking miliknya sendiri (userId cocok sesi).
+        Admin bersesi boleh membuka semua booking. Tanpa sesi → 401; pemain lain → 403.
       parameters:
         - name: code
           in: path
@@ -508,6 +514,14 @@ paths:
                     example: true
                   booking:
                     $ref: '#/components/schemas/BookingDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Sesi pemain lain (bukan pemilik booking)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
   /me/bookings:

@@ -7,13 +7,15 @@ import {
   requireServer,
   TEST_DATE,
   TEST_EMAIL,
+  TEST_OTHER_EMAIL,
+  TEST_OTHER_PHONE,
   TEST_PASSWORD,
   TEST_PHONE,
 } from "../helpers/api";
 
 /**
  * Alur pelanggan F1–F5 lewat HTTP: cari slot → daftar akun → booking → bayar
- * (mock) → webhook → tiket. Satu akun, satu sesi, ±15 request.
+ * (mock) → webhook → tiket. Satu akun, satu sesi, ±18 request.
  */
 
 const client = apiClient();
@@ -196,12 +198,37 @@ describe("alur pelanggan (F1–F5)", () => {
     expect(res.body.bookings.map((b) => b.code)).toContain(bookingCode);
   });
 
-  it("detail booking publik mengembalikan nomor HP ternormalisasi", async () => {
+  it("detail booking milik sesi mengembalikan nomor HP ternormalisasi", async () => {
     const res = await client.get<{ booking: { code: string; customerPhone: string | null } }>(
       `/api/bookings/${bookingCode}`,
     );
     expect(res.status).toBe(200);
     expect(res.body.booking.code).toBe(bookingCode);
     expect(res.body.booking.customerPhone).toBe(TEST_PHONE);
+  });
+
+  it("detail booking tanpa sesi ditolak 401", async () => {
+    const anonymous = apiClient();
+    const res = await anonymous.get<{ ok: boolean }>(`/api/bookings/${bookingCode}`);
+    expect(res.status).toBe(401);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it("detail booking pemain lain ditolak 403", async () => {
+    const other = apiClient();
+    const register = await other.post<{ user: { email: string } }>("/api/auth/register", {
+      name: "Pemain Lain",
+      email: TEST_OTHER_EMAIL,
+      password: TEST_PASSWORD,
+      phone: TEST_OTHER_PHONE,
+    });
+    expect(register.status).toBe(201);
+
+    const res = await other.get<{ ok: boolean; message: string }>(
+      `/api/bookings/${bookingCode}`,
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.message).toContain("bukan pemilik");
   });
 });

@@ -2,7 +2,7 @@
 
 > Referensi teknis untuk seluruh endpoint backend (`src/app/api/`).
 > Spesifikasi mesin-terbaca: [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) (impor ke Postman / Swagger UI).
-> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.2-akun` (revisi akun + operasional 2026-11-15).**
+> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.3-privasi` (kunci detail booking 2026-11-17).**
 > Source of truth implementasi tetap kode di `src/app/api/` + skema `src/db/schema.ts`.
 
 ## Isi Dokumen
@@ -312,12 +312,12 @@ curl -X POST http://localhost:3100/api/bookings \
 | Kena closure | 409 | `Sebagian jam bersinggungan dengan jadwal tutup/maintenance.` |
 | Di luar jam | 409 | `Jam di luar operasional lapangan.` |
 
-### 5b.2 `GET /api/bookings/:code` — detail via kode (publik)
+### 5b.2 `GET /api/bookings/:code` — detail via kode (wajib sesi)
 
-Dipakai layar konfirmasi + tiket (Batch 5).
+Perlu sesi `padel_session` (pemilik) atau sesi admin. Pelanggan hanya boleh membuka booking miliknya sendiri (`booking.userId` cocok dengan sesi); selain itu 403. Admin boleh membuka semua booking.
 
 ```bash
-curl http://localhost:3100/api/bookings/PD-VKB6WV
+curl http://localhost:3100/api/bookings/PD-VKB6WV -b cust.txt
 ```
 
 ```json
@@ -343,6 +343,8 @@ curl http://localhost:3100/api/bookings/PD-VKB6WV
 
 | Error | Kode | Contoh `message` |
 |---|---|---|
+| Tanpa sesi | 401 | `Masuk ke akun terlebih dahulu` |
+| Bukan pemilik | 403 | `Anda bukan pemilik booking ini` |
 | Tidak ada | 404 | `Booking tidak ditemukan` |
 
 ### 5b.3 `GET /api/me/bookings` — riwayat milik sesi
@@ -1067,6 +1069,7 @@ Ganti password mandiri (§5a.5, `/akun`, [ADR 0012](06-adr/0012-ganti-password-m
 | `1.0-batch7` | 2026-09-30 | +1 endpoint Batch 7 (admin reports JSON + CSV) + contoh + skema OpenAPI baru + wiring `/admin/laporan`. §8b, stub 9.6 terisi. Seluruh batch 1–7 selesai. |
 | `1.1-auth` | 2026-11-12 | **Revisi scope:** §5a OTP → auth email+password (`/api/auth/register|login|logout|me`, reset admin); F6 + notifikasi dipensiunkan (§7c → `cron/anonymize`); `user_sessions` baru; `otp_codes` & `notification_logs` di-drop; rate-limit registrasi/login. Mengikuti ADR 0009–0011. |
 | `1.2-akun` | 2026-11-15 | **Akun + operasional:** sesi pemain pakai token acak + hash SHA-256 (bukan HMAC); `POST /api/auth/change-password` (§5a.5) + halaman `/akun`; `GET /api/admin/users` + `POST /api/admin/users/:id/reset-password` + halaman `/admin/users` (§7d); `GET /api/tickets/:kode` wajib login + pemilik (401/403, §5d.1); rate-limit endpoint sensitif pindah ke tabel Postgres `rate_limits`; jadwal Vercel Cron di `vercel.json` (§5c.4, §7c.1). Mengikuti ADR 0012–0013. |
+| `1.3-privasi` | 2026-11-17 | **Privasi booking:** `GET /api/bookings/:code` tidak lagi publik — wajib sesi, pemain hanya pemilik (401/403), admin boleh semua (§5b.2 + OpenAPI). Test guard privasi ditambah (tiket tanpa sesi 401, guest reset 409). |
 
 ---
 

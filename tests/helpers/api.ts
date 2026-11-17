@@ -14,13 +14,16 @@ export const TEST_PHONE = process.env.TEST_PHONE ?? "6280000000001";
 export const TEST_EMAIL = process.env.TEST_EMAIL ?? "pemain-test@padelclub.test";
 export const TEST_PASSWORD = process.env.TEST_PASSWORD ?? "rahasia-test-123";
 export const TEST_PHONE_WALKIN = "6280000000002";
+/** Akun kedua — dipakai menguji akses 403 (bukan pemilik tiket/booking). */
+export const TEST_OTHER_EMAIL = "pemain-lain@padelclub.test";
+export const TEST_OTHER_PHONE = "6280000000003";
 
 /** Tanggal jauh ke depan supaya tidak bentrok dengan booking asli. */
 export const TEST_DATE = isoDate(45);
 export const TEST_DATE_CLOSURE = isoDate(46);
 
 /** Batas request per run — mencegah test jadi beban server. */
-export const REQUEST_BUDGET = 60;
+export const REQUEST_BUDGET = 70;
 
 export interface ApiResponse<T = Record<string, unknown>> {
   status: number;
@@ -135,7 +138,7 @@ function sql(): ReturnType<typeof postgres> {
 /** Hapus data uji sisa run sebelumnya / run ini (hanya baris milik test). */
 export async function cleanupTestData(): Promise<void> {
   const db = sql();
-  const phones = [TEST_PHONE, TEST_PHONE_WALKIN];
+  const phones = [TEST_PHONE, TEST_PHONE_WALKIN, TEST_OTHER_PHONE];
   for (const phone of phones) {
     // Kolom camelCase karena schema Drizzle memakai identifier ber-quote.
     const rows = await db`
@@ -151,7 +154,7 @@ export async function cleanupTestData(): Promise<void> {
     }
     await db`DELETE FROM users WHERE phone = ${phone}`;
   }
-  await db`DELETE FROM users WHERE email = ${TEST_EMAIL}`;
+  await db`DELETE FROM users WHERE email IN (${TEST_EMAIL}, ${TEST_OTHER_EMAIL})`;
   await db`DELETE FROM closures WHERE reason LIKE ${"TEST-%"}`;
 }
 

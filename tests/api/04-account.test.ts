@@ -3,16 +3,18 @@ import {
   apiClient,
   cleanupTestData,
   closeTestDb,
+  isoDate,
   requireServer,
   requestCountSoFar,
   TEST_EMAIL,
   TEST_PASSWORD,
   TEST_PHONE,
+  TEST_PHONE_WALKIN,
 } from "../helpers/api";
 
 /**
  * Akun: ganti password mandiri (ADR 0012) + reset password oleh admin.
- * Satu akun, ±10 request; cleanup memakai email/HP test yang sama.
+ * Satu akun + alur walk-in, ±17 request; cleanup memakai email/HP test yang sama.
  */
 
 const NEW_PASSWORD = "rahasia-baru-456";
@@ -135,7 +137,47 @@ describe("akun: ganti & reset password (ADR 0012)", () => {
     expect(me.status).toBe(401);
   });
 
+  it("reset password user bayangan ditolak 409", async () => {
+    const date = isoDate(48);
+    const admin = apiClient();
+    const login = await admin.post("/api/admin/login", {
+      username: process.env.SEED_ADMIN_USER ?? "admin",
+      password: ADMIN_PASSWORD,
+    });
+    expect(login.status).toBe(200);
+
+    const schedule = await admin.get<{
+      schedule: { slots: { courtId: number; hour: number; status: string }[] };
+    }>(`/api/admin/schedule?date=${date}`);
+    const free = schedule.body.schedule.slots.find((slot) => slot.status === "kosong");
+    expect(free).toBeDefined();
+
+    const created = await admin.post<{ booking: { code: string } }>("/api/admin/bookings", {
+      courtId: free!.courtId,
+      date,
+      hours: [free!.hour],
+      name: "Tes Guest Password",
+      phone: TEST_PHONE_WALKIN,
+      paid: true,
+    });
+    expect(created.status).toBe(201);
+
+    const list = await admin.get<{
+      users: { id: number; phone: string | null; isGuest: boolean }[];
+    }>(`/api/admin/users?q=${TEST_PHONE_WALKIN}`);
+    const guest = list.body.users.find((user) => user.phone === TEST_PHONE_WALKIN && user.isGuest);
+    expect(guest).toBeDefined();
+
+    const reset = await admin.post<{ ok: boolean; message: string }>(
+      `/api/admin/users/${guest!.id}/reset-password`,
+      { password: TEST_PASSWORD },
+    );
+    expect(reset.status).toBe(409);
+    expect(reset.body.ok).toBe(false);
+    expect(reset.body.message).toContain("User bayangan");
+  });
+
   it("jumlah request tetap di bawah anggaran", () => {
-    expect(requestCountSoFar()).toBeLessThanOrEqual(13);
+    expect(requestCountSoFar()).toBeLessThanOrEqual(18);
   });
 });

@@ -25,7 +25,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S12 | Lib backend shared (slots, sesi token+hash, rate-limit, payment mock/midtrans) | ✅ | `src/lib/*.ts` (2026-09-30; sesi pemain token acak + SHA-256 sejak 2026-11-12) |
 | S13 | Auth admin backend (scrypt + sesi DB, ganti cookie demo) | ✅ | `POST /api/admin/login|logout`, `GET /api/admin/me` (2026-09-30) |
 | S14 | Index hot-path + connection pool DB | ✅ | Migrasi `0003` (11 index: cron, riwayat, grid, OTP, log) + `max: 5` di `src/db/index.ts` (2026-11-10) |
-| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (4 file, ±60 request), guard DB test + localhost, `npm run test:api` (2026-11-10; file akun ditambah 2026-11-15) |
+| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (4 file, ±70 request), guard DB test + localhost, `npm run test:api` (2026-11-10; file akun ditambah 2026-11-15; guard privasi booking 2026-11-17) |
 | S16 | Polling jadwal hemat (cache + versi + delta 304) | ✅ | `src/lib/slot-status.ts`, `GET /api/slots/status`, `getDaySchedule` 1 roundtrip, strip minggu 1 request (2026-11-10) |
 | S17 | Auth pemain email + password (ganti OTP) | ✅ | [ADR 0009](docs/06-adr/0009-akun-email-password.md): `/api/auth/register|login|logout|me`, `user_sessions` (token opaque + SHA-256), halaman `/login` + `/daftar`, sesi `padel_session` berbasis `userId` (2026-11-12) |
 | S18 | User bayangan walk-in + cron anonimisasi 7 hari | ✅ | [ADR 0011](docs/06-adr/0011-user-bayangan-walkin.md): `users.isGuest`, `anonymizedAt`, `/api/cron/anonymize`, dedupe guest by HP (2026-11-12) |
@@ -115,7 +115,6 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 ### Gap terbuka (2026-11-15) — belum dikerjakan
 
 **P1 — sebelum produksi**
-- `GET /api/bookings/{code}` masih **publik** dan mengembalikan `customerName`/`customerPhone`. Tiket `/api/tickets/{kode}` sudah owner-only; endpoint ini belum. Kunci ke pemilik sesi/admin, atau hapus dari alur publik (PRD §4.4 Security & Privacy).
 - **Midtrans sandbox e2e belum diuji.** Butuh `MIDTRANS_SERVER_KEY`, `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY` sandbox, `APP_PUBLIC_URL` publik (ngrok), dan webhook yang bisa menjangkau URL tersebut.
 - **Vercel Cron belum diverifikasi di deployment.** Set `CRON_SECRET` di Vercel; pastikan paket mengizinkan `*/5 * * * *` untuk `/api/cron/expire` (Hobby membatasi jadwal → expire bisa tertunda). Lokal hanya diuji lewat pemanggilan langsung.
 - **CI `api-tests` belum pernah jalan.** Job digerbangi `API_TESTS_ENABLED=1` + secret `TEST_DATABASE_URL`; belum diset di repo GitHub. Job `quality` (lint/typecheck/build) juga belum diverifikasi di runner.
@@ -125,8 +124,10 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - **Reset lupa password mandiri** dan verifikasi email belum ada (PRD Q7). Reset tetap via `/admin/users`; ganti password hanya saat sudah login (ADR 0012).
 - Scanner kamera gate hanya pratinjau; validasi tiket via input manual (`/admin/scanner`).
 - Rate-limit DB: belum ada test lintas-instance; pembersihan baris `rate_limits` hanya menumpang `/api/cron/expire`.
-- Cakupan test: tiket belum menguji eksplisit 401 (tanpa sesi) / 403 (pemain lain); reset password user bayangan 409 belum ditest (baru diverifikasi manual).
-- `/api/bookings/{code}` juga dipakai test (`01-customer-flow`) sebagai detail publik — bila endpoint dikunci, test dan dokumen §5b.2 ikut diubah.
+
+**Selesai 2026-11-17:**
+- `GET /api/bookings/{code}` dikunci: wajib sesi, pemain hanya boleh membuka booking miliknya (403 bila bukan pemilik), admin boleh semua. Docs §5b.2 + OpenAPI ikut diperbarui.
+- Test guard privasi: booking tanpa sesi 401, pemain lain 403, tiket tanpa sesi 401, reset password user bayangan 409.
 
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 
@@ -146,6 +147,15 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji terpisah setelah mig
 - **Admin akun:** `GET /api/admin/users?q=` menemukan akun; `POST /api/admin/users/:id/reset-password` 200 dan mencabut sesi user (sesi lama `/api/auth/me` → 401); user bayangan ditolak 409 (implementasi).
 - **Rate-limit:** endpoint sensitif memakai `rateLimitDb` (tabel `rate_limits`); endpoint jadwal tetap in-memory; migrasi diterapkan ke DB dev + test.
 - **Cron:** jadwal `vercel.json` belum diuji di Vercel (lokal memakai pemanggilan langsung dengan `CRON_SECRET`).
+
+## Uji Privasi Booking (2026-11-17)
+
+Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **57 test lulus (4 file).** `lint`, `typecheck`, `build` hijau.
+
+- **`GET /api/bookings/{code}`:** pemilik 200 (nomor HP tetap ternormalisasi); tanpa sesi 401; akun pemain lain 403 (`Anda bukan pemilik booking ini`); admin tetap bisa semua.
+- **Tiket:** tanpa sesi 401 (sebelum lookup kode); kode asing via sesi admin tetap 404.
+- **Admin users:** reset password user bayangan (`isGuest`) 409; alur walk-in membuat user bayangan seperti sebelumnya.
+- **Anggaran request:** naik dari ±60 ke ±70 per run (file `03-guards` 15, `04-account` 18).
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 
@@ -176,7 +186,7 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 
 ### Uji otomatis
 - Jalankan: `cp .env.test.example .env.test` → `npm run db:migrate:test && npm run db:seed:test` → `npm run dev:test` (terminal 1) → `npm run test:api` (terminal 2).
-- Serial (1 worker), ±60 request per run, tanpa load/stress test. Cleanup hanya menghapus baris nomor HP test + closure `TEST-*`.
+- Serial (1 worker), ±70 request per run, tanpa load/stress test. Cleanup hanya menghapus baris nomor HP test + closure `TEST-*`.
 - Guard: tolak `TEST_BASE_URL` non-lokal, tolak DB yang sama dengan `.env`, dan butuh nama DB ber-`test` atau `TEST_DB_CONFIRMED="1"`.
 
 ### Kesiapan produksi (belum selesai)

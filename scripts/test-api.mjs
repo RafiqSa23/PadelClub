@@ -52,7 +52,7 @@ if (!isLocal && process.env.ALLOW_REMOTE_TESTS !== "1") {
   process.exit(1);
 }
 
-console.log(`[test] Base URL: ${baseUrl} · serial, ±60 request, tanpa load test`);
+console.log(`[test] Base URL: ${baseUrl} · serial, ±70 request, tanpa load test`);
 
 // Preflight: pastikan server + DB sehat sebelum vitest jalan (gagal cepat,
 // bukan 3 file test gagal dengan pesan "server tidak terjangkau").

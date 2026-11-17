@@ -34,7 +34,7 @@ Seed admin: `admin / admin123` — change the password after first login
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run db:generate` / `db:migrate` / `db:studio` | Drizzle Kit |
 | `npm run db:seed` | Seed courts, hours, admin (`tsx src/db/seed.ts`) |
-| `npm test` / `npm run test:api` | HTTP API tests (serial, ±60 requests) |
+| `npm test` / `npm run test:api` | HTTP API tests (serial, ±70 requests) |
 | `npm run dev:test` | Dev server on port 3100 against the **test** DB |
 | `npm run db:migrate:test` / `db:seed:test` | Migrate/seed the test DB (`.env.test`) |
 
@@ -72,7 +72,7 @@ while the tab is hidden.
 ## Testing
 
 HTTP tests hit a running server — they never start one themselves and never run
-in parallel (1 worker, sequential files, ±60 requests per run) so dev/prod servers
+in parallel (1 worker, sequential files, ±70 requests per run) so dev/prod servers
 are not hammered.
 
 ```bash
