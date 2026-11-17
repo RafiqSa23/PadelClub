@@ -11,10 +11,10 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | User Journey | ✅ Selesai |
 | Spesifikasi Fitur | ✅ Selesai |
 | PRD | ✅ Selesai |
-| Keputusan Arsitektur (ADR) | ✅ Selesai (13 keputusan) |
+| Keputusan Arsitektur (ADR) | ✅ Selesai (14 keputusan) |
 | Spesifikasi Teknis | ⏳ Sebagian (PRD §4 + ADR 0005 & 0007) |
 | Design System (DESIGN.md) | ✅ Diadopsi (token di `src/app/globals.css`) |
-| Dokumentasi Backend API (07) | ✅ `1.2-akun` (33 paths / 35 operasi) |
+| Dokumentasi Backend API (07) | ✅ `1.5-qr` (34 paths / 36 operasi) |
 
 ## Indeks Dokumen
 
@@ -38,6 +38,7 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | [`06-adr/0011-user-bayangan-walkin.md`](06-adr/0011-user-bayangan-walkin.md) | Keputusan: user bayangan walk-in + anonimisasi 7 hari | Referensi |
 | [`06-adr/0012-ganti-password-mandiri.md`](06-adr/0012-ganti-password-mandiri.md) | Keputusan: ganti password mandiri saat login (sesi lain dicabut) | Referensi |
 | [`06-adr/0013-rate-limit-cron-produksi.md`](06-adr/0013-rate-limit-cron-produksi.md) | Keputusan: rate-limit Postgres lintas-instance + Vercel Cron | Referensi |
+| [`06-adr/0014-qr-tiket-bertanda-tangan.md`](06-adr/0014-qr-tiket-bertanda-tangan.md) | Keputusan: QR tiket HMAC + rotasi 5 menit + log pemindaian gate | Referensi |
 | [`DESIGN.md`](DESIGN.md) | Design system (diadopsi, status slot + arah visual) | Referensi |
 | [`07-api-backend.md`](07-api-backend.md) | Dokumentasi backend API + contoh curl (versi per batch) | Referensi |
 | [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) | Spesifikasi OpenAPI 3.1 (impor Postman/Swagger UI) | Referensi |
@@ -63,6 +64,7 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 7. Booking walk-in memakai **user bayangan**, dianonimisasi otomatis setelah **7 hari** ([ADR 0011](06-adr/0011-user-bayangan-walkin.md)).
 8. **Ganti password mandiri** saat sudah login di `/akun`; reset lupa password tetap lewat admin ([ADR 0012](06-adr/0012-ganti-password-mandiri.md)).
 9. Rate-limit endpoint sensitif **persisten di Postgres** + cron produksi via **Vercel Cron** ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)).
+10. QR tiket **bertanda tangan HMAC** dengan rotasi 5 menit; log pemindaian gate disimpan di `scan_logs` ([ADR 0014](06-adr/0014-qr-tiket-bertanda-tangan.md)).
 
 ## Changelog
 
@@ -94,3 +96,4 @@ Seluruh dokumen berbahasa Indonesia. Keputusan teknis dikunci di [`06-adr/`](06-
 | 2026-11-17 | Privasi booking: `GET /api/bookings/:code` wajib sesi + pemilik (401/403, admin boleh semua); test guard tiket 401/booking 403/guest reset 409; docs API `1.3-privasi` + OpenAPI disinkronkan. |
 | 2026-11-17 | QR tiket asli (`qrcode.react`) + scanner kamera gate (`jsqr`, dedupe 8 dtk, pilih kamera, fallback manual); F5 AC diperbarui. |
 | 2026-11-17 | Jendela check-in gate hari-H (WIB, H-30 mnt s/d sesi berakhir) di API + pesan scanner; bunyi gate sukses/gagal; docs API `1.4-checkin`. 67 test lulus (5 file). |
+| 2026-11-17 | ADR 0014: QR tiket bertanda tangan HMAC (TTL 5 mnt, `TICKET_QR_SECRET`) + verifikasi `?qr=` + log pemindaian persist (`scan_logs`, `GET /api/admin/scans`); migrasi `0006`; docs API `1.5-qr`. |

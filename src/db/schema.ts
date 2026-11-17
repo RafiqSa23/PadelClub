@@ -27,6 +27,9 @@ export const paymentStatusEnum = pgEnum('payment_status', [
   'expired',
 ]);
 
+// Hasil pemindaian gate: sukses, sudah pernah check-in, atau ditolak.
+export const scanOutcomeEnum = pgEnum('scan_outcome', ['ok', 'already', 'rejected']);
+
 export const users = pgTable(
   'users',
   {
@@ -230,6 +233,28 @@ export const adminSessions = pgTable(
   ],
 );
 
+// Audit pemindaian gate (ADR 0014). Disimpan agar riwayat bertahan setelah
+// reload/pergantian shift; penolakan sisi klien (batal/belum lunas) tidak masuk.
+export const scanLogs = pgTable(
+  'scan_logs',
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    // Booking bisa dihapus (cron/anonimisasi) — log tetap disimpan via `code`.
+    bookingId: integer().references(() => bookings.id, { onDelete: 'set null' }),
+    code: text().notNull(),
+    adminId: integer().references(() => admins.id, { onDelete: 'set null' }),
+    adminUsername: text(),
+    outcome: scanOutcomeEnum().notNull(),
+    reason: text(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Riwayat scanner: urut terbaru + filter kode.
+    index('scan_logs_created_idx').on(t.createdAt),
+    index('scan_logs_code_idx').on(t.code),
+  ],
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   bookings: many(bookings),
   sessions: many(userSessions),
@@ -283,6 +308,17 @@ export const adminsRelations = relations(admins, ({ many }) => ({
 export const adminSessionsRelations = relations(adminSessions, ({ one }) => ({
   admin: one(admins, {
     fields: [adminSessions.adminId],
+    references: [admins.id],
+  }),
+}));
+
+export const scanLogsRelations = relations(scanLogs, ({ one }) => ({
+  booking: one(bookings, {
+    fields: [scanLogs.bookingId],
+    references: [bookings.id],
+  }),
+  admin: one(admins, {
+    fields: [scanLogs.adminId],
     references: [admins.id],
   }),
 }));

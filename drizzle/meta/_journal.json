@@ -43,6 +43,13 @@
       "when": 1794761672050,
       "tag": "0005_powerful_jack_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794910762839,
+      "tag": "0006_steady_gargoyle",
+      "breakpoints": true
     }
   ]
 }

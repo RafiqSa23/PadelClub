@@ -23,7 +23,7 @@ export const TEST_DATE = isoDate(45);
 export const TEST_DATE_CLOSURE = isoDate(46);
 
 /** Batas request per run — mencegah test jadi beban server. */
-export const REQUEST_BUDGET = 70;
+export const REQUEST_BUDGET = 80;
 
 export interface ApiResponse<T = Record<string, unknown>> {
   status: number;
@@ -148,6 +148,7 @@ export async function cleanupTestData(): Promise<void> {
     `;
     const ids = rows.map((row) => Number(row.id));
     if (ids.length > 0) {
+      await db`DELETE FROM scan_logs WHERE "bookingId" IN ${db(ids)}`;
       await db`DELETE FROM payments WHERE "bookingId" IN ${db(ids)}`;
       await db`DELETE FROM booking_slots WHERE "bookingId" IN ${db(ids)}`;
       await db`DELETE FROM bookings WHERE id IN ${db(ids)}`;

@@ -154,6 +154,19 @@ describe("alur admin (F7–F11)", () => {
     expect(res.body.already).toBe(true);
   });
 
+  it("riwayat pemindaian tersimpan di DB (ADR 0014)", async () => {
+    const res = await admin.get<{
+      scans: { code: string; outcome: string; createdAt: string }[];
+    }>("/api/admin/scans?limit=5");
+    expect(res.status).toBe(200);
+    expect(res.body.scans.length).toBeGreaterThan(0);
+    // Booking +45 hari tadi tercatat sebagai penolakan "hari-H".
+    expect(res.body.scans.some((scan) => scan.code === walkinCode)).toBe(true);
+    expect(res.body.scans.every((scan) => ["ok", "already", "rejected"].includes(scan.outcome))).toBe(
+      true,
+    );
+  });
+
   it("daftar penutupan lapangan bisa dibaca (F9)", async () => {
     const res = await admin.get<{ closures: unknown[] }>(
       `/api/admin/closures?date=${TEST_DATE_CLOSURE}`,

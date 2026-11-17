@@ -5,6 +5,7 @@ import { jsonError, jsonOk } from '@/lib/api';
 import { resolveCustomer } from '@/lib/bookings';
 import { getCurrentUser } from '@/lib/user-auth';
 import { getCurrentAdmin } from '@/lib/admin-auth';
+import { signTicketQr, verifyTicketQr } from '@/lib/ticket-qr';
 
 /**
  * Tiket via kode (F5): wajib login.
@@ -28,6 +29,20 @@ export async function GET(
   // Pelanggan hanya boleh lihat tiket miliknya sendiri.
   if (user && !admin && (!booking.userId || Number(booking.userId) !== user.id)) {
     return jsonError('Anda bukan pemilik tiket ini', 403);
+  }
+
+  // Scanner gate mengirim payload QR bertanda tangan; tolak token palsu/kedaluwarsa.
+  const qrParam = new URL(request.url).searchParams.get('qr');
+  if (qrParam) {
+    const verification = verifyTicketQr(qrParam, booking.code);
+    if (!verification.valid) {
+      return jsonError(
+        verification.reason === 'expired'
+          ? 'QR tiket sudah kedaluwarsa. Minta pemain memuat ulang halaman tiket.'
+          : 'QR tiket tidak valid. Gunakan QR terbaru dari halaman tiket.',
+        403,
+      );
+    }
   }
 
   const [slotRows, courtRows, paymentRows, closureRows] = await Promise.all([
@@ -64,10 +79,13 @@ export async function GET(
 
   const court = courtRows[0];
   const payment = paymentRows[0];
+  const qr = signTicketQr(booking.code);
 
   return jsonOk({
     ticket: {
       code: booking.code,
+      qrPayload: qr.payload,
+      qrExpiresAt: qr.expiresAt.toISOString(),
       courtId: booking.courtId,
       courtName: court?.name ?? null,
       description: court?.description ?? null,

@@ -4,7 +4,9 @@ import { QRCodeCanvas } from "qrcode.react";
 
 /**
  * QR asli (bukan pola dekoratif) — bisa dipindai kamera/scanner gate.
- * Payload tiket = kode booking (`PD-XXXXXX`); level M cukup tahan noda layar.
+ * Payload tiket = token bertanda tangan `v1.<KODE>.<exp>.<hmac>` (ADR 0014),
+ * bukan kode booking polos, supaya QR palsu/kedaluwarsa ditolak server.
+ * Level M cukup tahan noda layar.
  */
 export function QRBox({ text, size = 144 }: { text: string; size?: number }) {
   return (

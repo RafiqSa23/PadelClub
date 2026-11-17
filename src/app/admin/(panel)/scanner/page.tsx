@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import jsQR from "jsqr";
 import { AdminShell } from "@/components/layout/AdminShell";
 import { MIcon } from "@/components/ui/MIcon";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/cn";
 import { dateLabel, hourLabel } from "@/lib/format";
+import { extractTicketCode, parseTicketQrPayload } from "@/lib/ticket-qr-format";
 import type { BookingStatus, PaymentStatus } from "@/lib/types";
 
 type Mode = "camera" | "manual" | "log";
@@ -29,12 +30,23 @@ interface ScannedTicket {
 
 interface LogEntry {
   id: number;
+  at: number;
   time: string;
   code: string;
   name: string;
   court: string;
   ok: boolean;
   note: string;
+}
+
+interface ServerScan {
+  id: number;
+  code: string;
+  customerName: string | null;
+  courtName: string | null;
+  outcome: "ok" | "already" | "rejected";
+  reason: string | null;
+  createdAt: string;
 }
 
 interface ScanResult {
@@ -44,11 +56,41 @@ interface ScanResult {
   booking?: ScannedTicket;
 }
 
-/** Terima kode polos atau URL tiket (`/tiket/PD-XXXXXX`). */
-function extractCode(payload: string) {
-  const trimmed = payload.trim();
-  const fromUrl = trimmed.match(/\/tiket\/([A-Za-z0-9-]+)/);
-  return (fromUrl?.[1] ?? trimmed).replace(/^#/, "").toUpperCase();
+/** Waktu WIB dari ISO server (mis. `createdAt` log). */
+function wibTime(iso: string) {
+  return `${new Date(iso).toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Jakarta",
+  })} WIB`;
+}
+
+/** Log tersimpan dari server (bertahan setelah reload/pergantian shift). */
+async function fetchScanHistory(): Promise<LogEntry[]> {
+  const res = await fetch("/api/admin/scans?limit=20", {
+    cache: "no-store",
+    credentials: "include",
+  });
+  if (!res.ok) return [];
+  const json = (await res.json()) as { ok: boolean; scans?: ServerScan[] };
+  if (!json.ok || !json.scans) return [];
+
+  return json.scans.map((scan) => ({
+    id: scan.id,
+    at: new Date(scan.createdAt).getTime(),
+    time: wibTime(scan.createdAt),
+    code: scan.code,
+    name: scan.customerName ?? "—",
+    court: scan.courtName ?? "—",
+    ok: scan.outcome === "ok",
+    note:
+      scan.outcome === "ok"
+        ? "Sukses masuk"
+        : scan.outcome === "already"
+          ? "Sudah check-in"
+          : (scan.reason ?? "Ditolak"),
+  }));
 }
 
 export default function AdminScannerPage() {
@@ -57,6 +99,7 @@ export default function AdminScannerPage() {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [validating, setValidating] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
+  const [history, setHistory] = useState<LogEntry[]>([]);
   const [toast, setToast] = useState<string | undefined>();
   const [cameraState, setCameraState] = useState<CameraState>("idle");
   const [cameraError, setCameraError] = useState<string | undefined>();
@@ -70,17 +113,16 @@ export default function AdminScannerPage() {
   const audioRef = useRef<AudioContext | null>(null);
   const validatingRef = useRef(false);
   const lastScanRef = useRef<{ code: string; at: number } | null>(null);
-  const validateRef = useRef<(raw: string) => Promise<void>>(async () => {});
-
-  const failedCount = log.filter((entry) => !entry.ok).length;
-  const successCount = log.filter((entry) => entry.ok).length;
-  const inVenue = successCount;
+  const validateRef = useRef<(raw: string, origin?: "camera" | "manual") => Promise<void>>(
+    async () => {},
+  );
 
   function nowWib() {
     return `${new Date().toLocaleTimeString("id-ID", {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
+      timeZone: "Asia/Jakarta",
     })} WIB`;
   }
 
@@ -127,37 +169,94 @@ export default function AdminScannerPage() {
     };
   }, []);
 
-  function pushLog(entry: Omit<LogEntry, "id" | "time">) {
-    setLog((previous) => [{ id: Date.now(), time: nowWib(), ...entry }, ...previous].slice(0, 20));
+  function pushLog(entry: Omit<LogEntry, "id" | "at" | "time">) {
+    const at = Date.now();
+    setLog((previous) => [{ id: at, at, time: nowWib(), ...entry }, ...previous].slice(0, 20));
   }
 
-  function deny(title: string, subtitle: string, ticket: ScannedTicket | undefined, note: string) {
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistory(await fetchScanHistory());
+    } catch {
+      // Riwayat bersifat tambahan — kegagalan muat tidak mengganggu pemindaian.
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchScanHistory()
+      .then((scans) => {
+        if (!cancelled) setHistory(scans);
+      })
+      .catch(() => {
+        // Riwayat bersifat tambahan.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const entries = useMemo(
+    () => [...log, ...history].sort((a, b) => b.at - a.at).slice(0, 20),
+    [log, history],
+  );
+  const failedCount = entries.filter((entry) => !entry.ok).length;
+  const successCount = entries.filter((entry) => entry.ok).length;
+  const inVenue = successCount;
+
+  function deny(
+    title: string,
+    subtitle: string,
+    ticket: ScannedTicket | undefined,
+    note: string,
+    origin: "client" | "server" = "client",
+  ) {
     playGateTone(false);
     setResult({ ok: false, title, subtitle, booking: ticket });
-    pushLog({
-      code: ticket?.code ?? input.trim(),
-      name: ticket?.customerName ?? "—",
-      court: ticket?.courtName ?? "—",
-      ok: false,
-      note,
-    });
+    if (origin === "client") {
+      pushLog({
+        code: ticket?.code ?? input.trim(),
+        name: ticket?.customerName ?? "—",
+        court: ticket?.courtName ?? "—",
+        ok: false,
+        note,
+      });
+    }
   }
 
-  async function validate(raw: string) {
-    const code = extractCode(raw);
+  async function validate(raw: string, origin: "camera" | "manual" = "manual") {
+    const signed = parseTicketQrPayload(raw);
+    const code = extractTicketCode(raw);
     if (!code) {
       setResult({
         ok: false,
-        title: "Kode kosong",
-        subtitle: "Masukkan kode booking sebelum memvalidasi.",
+        title: "QR tidak valid",
+        subtitle: "Payload QR/kode booking tidak dikenali.",
       });
       return;
     }
 
+    // Kamera wajib membawa payload bertanda tangan; input manual tetap boleh
+    // kode polos karena resepsionis adalah aktor tepercaya.
+    if (origin === "camera" && !signed) {
+      deny(
+        "QR tidak valid",
+        "Gunakan QR terbaru dari halaman tiket — kode teks polos tidak diterima kamera.",
+        undefined,
+        "QR tidak valid",
+      );
+      return;
+    }
+
+    const qrPayload = origin === "camera" && signed ? raw.trim() : null;
+    const url = `/api/tickets/${encodeURIComponent(code)}${
+      qrPayload ? `?qr=${encodeURIComponent(qrPayload)}` : ""
+    }`;
+
     validatingRef.current = true;
     setValidating(true);
     try {
-      const res = await fetch(`/api/tickets/${encodeURIComponent(code)}`, {
+      const res = await fetch(url, {
         cache: "no-store",
         credentials: "include",
       });
@@ -169,6 +268,13 @@ export default function AdminScannerPage() {
       if (!json.ok || !json.ticket) {
         if (res.status === 404) {
           deny("Tiket tidak ditemukan", `Kode "${code}" tidak terdaftar di sistem.`, undefined, "Kode tidak ditemukan");
+        } else if (res.status === 403) {
+          deny(
+            "QR tidak valid",
+            json.message ?? "QR tiket tidak valid atau sudah kedaluwarsa.",
+            undefined,
+            "QR tidak valid",
+          );
         } else {
           setResult({
             ok: false,
@@ -216,10 +322,13 @@ export default function AdminScannerPage() {
             checkJson.message ?? "Check-in hanya bisa pada hari-H sesuai jam sesi.",
             ticket,
             "Di luar jadwal",
+            "server",
           );
+          void loadHistory();
           return;
         }
-        deny("Check-in gagal", checkJson.message ?? "Coba lagi.", ticket, "Check-in gagal");
+        deny("Check-in gagal", checkJson.message ?? "Coba lagi.", ticket, "Check-in gagal", "server");
+        void loadHistory();
         return;
       }
 
@@ -235,13 +344,7 @@ export default function AdminScannerPage() {
         subtitle: `Access Granted • ${checked.courtName ?? ""} ${hourLabel(start, end)}`,
         booking: checked,
       });
-      pushLog({
-        code: checked.code,
-        name: checked.customerName ?? "—",
-        court: checked.courtName ?? "—",
-        ok: true,
-        note: "Sukses masuk",
-      });
+      void loadHistory();
       setToast(`Check-in ${checked.customerName ?? checked.code} berhasil.`);
       playGateTone(true);
     } catch {
@@ -358,14 +461,14 @@ export default function AdminScannerPage() {
       });
       if (!found) return;
 
-      const code = extractCode(found.data);
+      const code = extractTicketCode(found.data);
       if (!code) return;
       const previous = lastScanRef.current;
       const at = Date.now();
       if (previous && previous.code === code && at - previous.at < 8000) return;
       lastScanRef.current = { code, at };
       setInput(code);
-      void validateRef.current(code);
+      void validateRef.current(found.data, "camera");
     };
 
     frame = requestAnimationFrame(tick);
@@ -418,7 +521,7 @@ export default function AdminScannerPage() {
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-5 rounded-xl bg-mist-shadow px-5 py-2.5">
               <div className="flex flex-col">
-                <span className="text-label-sm text-slate-whisper">Terverifikasi Hari Ini</span>
+                <span className="text-label-sm text-slate-whisper">Terverifikasi (log)</span>
                 <span className="text-headline-sm text-court-green-deep">
                   {successCount}{" "}
                   <span className="text-label-sm font-medium text-slate-whisper">Tiket</span>
@@ -844,10 +947,10 @@ export default function AdminScannerPage() {
                     Riwayat 5 Pemindaian Terakhir
                   </span>
                 </div>
-                <span className="text-label-sm text-slate-whisper">{log.length} total log</span>
+                <span className="text-label-sm text-slate-whisper">{entries.length} total log</span>
               </div>
 
-              {log.length === 0 ? (
+              {entries.length === 0 ? (
                 <EmptyState
                   title="Belum ada log shift"
                   description="Riwayat pemindaian tiket pada shift ini akan tampil di sini."
@@ -868,7 +971,7 @@ export default function AdminScannerPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-surface-container-low text-body-md">
-                      {log.slice(0, 5).map((entry) => (
+                      {entries.slice(0, 5).map((entry) => (
                         <tr key={entry.id} className="transition-colors hover:bg-mist-shadow">
                           <td className="px-3 py-2.5 font-bold tabular-nums text-on-surface">
                             {entry.time}

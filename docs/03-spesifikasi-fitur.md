@@ -93,15 +93,16 @@
 - **Kriteria Terima (AC):**
   - Tiket memuat: kode unik, nama&HP pemesan, lapangan, tanggal, jam, durasi, total harga, status.
   - Tiket hanya bisa dibuka pemiliknya (sesi `padel_session` cocok `booking.userId`) atau admin bersesi; tanpa login → diarahkan ke `/login`, pemain lain → pesan "bukan pemilik tiket". Tiket selalu tersedia di `/riwayat` akun pemesan.
-  - Tiket menampilkan QR asli yang bisa dipindai (payload = kode booking; level koreksi M).
-  - Scanner gate (`/admin/scanner`) memakai kamera perangkat untuk mendekode QR otomatis (jsQR, ~8 fps), memvalidasi tiket, lalu check-in via `POST /api/admin/checkin`. Kode yang sama diabaikan 8 detik agar tidak spam; input manual tetap tersedia.
+  - Tiket menampilkan QR asli yang bisa dipindai. Payload bukan kode polos, melainkan token bertanda tangan `v1.<kode>.<exp>.<hmac>` (HMAC-SHA256, berlaku 5 menit) dan diperbarui otomatis ([ADR 0014](06-adr/0014-qr-tiket-bertanda-tangan.md)).
+  - Scanner gate (`/admin/scanner`) memakai kamera perangkat untuk mendekode QR otomatis (jsQR, ~8 fps), memverifikasi token lewat `GET /api/tickets/:kode?qr=...`, lalu check-in via `POST /api/admin/checkin`. QR palsu/kedaluwarsa ditolak; kode yang sama diabaikan 8 detik agar tidak spam; input manual (kode polos) tetap tersedia untuk resepsionis.
   - Check-in hanya pada **hari-H**: dibuka 30 menit sebelum jam pertama dan ditutup tepat saat sesi terakhir berakhir (WIB). Di luar jendela → 409 dengan pesan spesifik (`src/lib/checkin-window.ts`).
+  - Setiap hasil API check-in (`ok`/`already`/`rejected`) dicatat ke tabel `scan_logs` dan dimuat ulang oleh scanner via `GET /api/admin/scans`, sehingga riwayat bertahan setelah reload/pergantian shift.
   - Scanner memberi bunyi gate (dua nada naik saat lolos, nada rendah saat ditolak) dan tombol aktif/nonaktif suara.
   - Kamera butuh HTTPS atau `localhost` dan izin browser; bila ditolak/tidak ada kamera, scanner menampilkan pesan jelas dan validasi manual tetap bisa dipakai.
   - Admin dapat menandai pelanggan "sudah check-in" dari halaman tiket.
   - Tiket berstatus `Batal`/`Tutup` menampilkan pemberitahuan jelas bila dilihat.
   - Tidak ada tiket yang dikirim otomatis ke kanal eksternal (ditunda v2.0, [ADR 0010](06-adr/0010-mvp-tanpa-notifikasi.md)).
-- **Batasan:** Tiket tidak bisa dipindah-tangankan secara langsung (pemindahan hak di luar MVP).
+- **Batasan:** Tiket tidak bisa dipindah-tangankan secara langsung (pemindahan hak di luar MVP). QR kedaluwarsa setelah 5 menit; tiket cetak lama diverifikasi lewat input manual, dan screenshot masih berlaku sampai TTL habis ([ADR 0014](06-adr/0014-qr-tiket-bertanda-tangan.md)).
 
 ---
 

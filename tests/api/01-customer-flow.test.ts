@@ -25,6 +25,7 @@ let hour = 0;
 let bookingCode = "";
 let orderId = "";
 let slotVersion = 0;
+let qrPayload = "";
 
 beforeAll(async () => {
   await requireServer();
@@ -184,12 +185,42 @@ describe("alur pelanggan (F1–F5)", () => {
 
   it("tiket pemilik memuat status lunas + jam (F5)", async () => {
     const res = await client.get<{
-      ticket: { code: string; status: string; paymentStatus: string; hours: number[] };
+      ticket: {
+        code: string;
+        status: string;
+        paymentStatus: string;
+        hours: number[];
+        qrPayload: string;
+        qrExpiresAt: string;
+      };
     }>(`/api/tickets/${bookingCode}`);
     expect(res.status).toBe(200);
     expect(res.body.ticket.status).toBe("terkonfirmasi");
     expect(res.body.ticket.paymentStatus).toBe("paid");
     expect(res.body.ticket.hours).toEqual([hour]);
+    expect(res.body.ticket.qrPayload).toMatch(/^v1\.PD-[A-Z0-9]+\.\d+\.[A-Za-z0-9_-]+$/);
+    expect(new Date(res.body.ticket.qrExpiresAt).getTime()).toBeGreaterThan(Date.now());
+    qrPayload = res.body.ticket.qrPayload;
+  });
+
+  it("scanner dengan QR bertanda tangan valid diterima", async () => {
+    const res = await client.get<{ ticket: { code: string } }>(
+      `/api/tickets/${bookingCode}?qr=${encodeURIComponent(qrPayload)}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ticket.code).toBe(bookingCode);
+  });
+
+  it("QR yang dimodifikasi ditolak 403", async () => {
+    // Geser expiry tanpa menandatangani ulang → HMAC tidak cocok.
+    const tampered = qrPayload.replace(/\.(\d+)\./, (_, exp: string) => `.${Number(exp) + 1}.`);
+    expect(tampered).not.toBe(qrPayload);
+    const res = await client.get<{ ok: boolean; message: string }>(
+      `/api/tickets/${bookingCode}?qr=${encodeURIComponent(tampered)}`,
+    );
+    expect(res.status).toBe(403);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.message).toContain("tidak valid");
   });
 
   it("riwayat booking milik sesi memuat kode ini (F5)", async () => {

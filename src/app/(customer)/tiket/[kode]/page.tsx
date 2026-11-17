@@ -23,6 +23,8 @@ import type { BookingStatus } from "@/lib/types";
 
 interface Ticket {
   code: string;
+  qrPayload: string;
+  qrExpiresAt: string;
   courtId: number;
   courtName: string | null;
   description: string | null;
@@ -41,6 +43,8 @@ interface Ticket {
 }
 
 const HOTLINE = "+62 811-2345-7890";
+/** QR bertanda tangan berumur 5 menit; segarkan sebelum kedaluwarsa. */
+const QR_REFRESH_MS = 4 * 60 * 1000;
 
 function gcalUrl(opts: {
   title: string;
@@ -108,9 +112,21 @@ export default function TicketPage() {
         if (!cancelled) setLoadError("Tidak dapat terhubung ke server.");
       }
     }
+
+    // Muat awal + rotasi QR berkala dan saat tab kembali aktif.
     void load();
+    const interval = window.setInterval(() => {
+      void load();
+    }, QR_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [code, router]);
 
@@ -371,7 +387,7 @@ export default function TicketPage() {
             <div className="flex flex-col items-center gap-6 p-5 sm:p-6 md:flex-row">
               <div className="flex w-full shrink-0 flex-col items-center gap-3 self-start bg-surface-container-low p-4 shadow-sm sm:w-auto sm:self-auto">
                 <div className="rounded-lg bg-field-white p-3 shadow-sm">
-                  <QRBox text={booking.code} size={176} />
+                  <QRBox text={booking.qrPayload} size={176} />
                   <div className="mt-2 flex justify-center">
                     <span className="rounded bg-primary-container px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-field-white">
                       Gate Pass
@@ -384,6 +400,18 @@ export default function TicketPage() {
                   </span>
                   <p className="mx-auto mt-1 max-w-[200px] text-body-sm leading-tight text-slate-whisper">
                     Tunjukkan ke resepsionis atau scanner gate lapangan.
+                  </p>
+                  <p className="mx-auto mt-1 max-w-[200px] text-[11px] leading-tight text-slate-whisper">
+                    QR aktif s/d{" "}
+                    <span className="font-semibold tabular-nums text-on-surface">
+                      {new Date(booking.qrExpiresAt).toLocaleTimeString("id-ID", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        timeZone: "Asia/Jakarta",
+                      })}{" "}
+                      WIB
+                    </span>{" "}
+                    — diperbarui otomatis.
                   </p>
                 </div>
               </div>

@@ -5,6 +5,7 @@ import { jsonError, jsonOk } from '@/lib/api';
 import { getCurrentAdmin } from '@/lib/admin-auth';
 import { evaluateCheckinWindow } from '@/lib/checkin-window';
 import { rateLimitDb } from '@/lib/rate-limit-db';
+import { recordScan } from '@/lib/scan-log';
 
 /**
  * Check-in oleh admin (F5): menandai pelanggan "sudah check-in" dari tiket.
@@ -29,11 +30,36 @@ export async function POST(request: Request) {
 
   const rows = await db.select().from(bookings).where(eq(bookings.code, code)).limit(1);
   const booking = rows[0];
-  if (!booking) return jsonError('Booking tidak ditemukan', 404);
+  if (!booking) {
+    await recordScan({
+      code,
+      adminId: admin.id,
+      adminUsername: admin.username,
+      outcome: 'rejected',
+      reason: 'Booking tidak ditemukan',
+    });
+    return jsonError('Booking tidak ditemukan', 404);
+  }
   if (booking.status !== 'terkonfirmasi') {
+    await recordScan({
+      bookingId: booking.id,
+      code: booking.code,
+      adminId: admin.id,
+      adminUsername: admin.username,
+      outcome: 'rejected',
+      reason: 'Booking belum terkonfirmasi',
+    });
     return jsonError('Hanya booking terkonfirmasi yang bisa check-in', 409);
   }
   if (booking.checkedInAt) {
+    await recordScan({
+      bookingId: booking.id,
+      code: booking.code,
+      adminId: admin.id,
+      adminUsername: admin.username,
+      outcome: 'already',
+      reason: 'Sudah check-in',
+    });
     return jsonOk({
       ticket: {
         code: booking.code,
@@ -53,6 +79,14 @@ export async function POST(request: Request) {
     slotRows.map((row) => row.hour),
   );
   if (!window.allowed) {
+    await recordScan({
+      bookingId: booking.id,
+      code: booking.code,
+      adminId: admin.id,
+      adminUsername: admin.username,
+      outcome: 'rejected',
+      reason: window.reason ?? 'Di luar jadwal check-in',
+    });
     return jsonError(window.reason ?? 'Di luar jadwal check-in', 409);
   }
 
@@ -62,6 +96,15 @@ export async function POST(request: Request) {
     .set({ checkedInAt: now, checkedInBy: admin.username, updatedAt: now })
     .where(eq(bookings.id, booking.id))
     .returning({ checkedInAt: bookings.checkedInAt, checkedInBy: bookings.checkedInBy });
+
+  await recordScan({
+    bookingId: booking.id,
+    code: booking.code,
+    adminId: admin.id,
+    adminUsername: admin.username,
+    outcome: 'ok',
+    reason: 'Check-in gate',
+  });
 
   return jsonOk({
     ticket: {

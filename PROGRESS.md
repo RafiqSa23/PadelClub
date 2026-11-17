@@ -25,7 +25,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S12 | Lib backend shared (slots, sesi token+hash, rate-limit, payment mock/midtrans) | ✅ | `src/lib/*.ts` (2026-09-30; sesi pemain token acak + SHA-256 sejak 2026-11-12) |
 | S13 | Auth admin backend (scrypt + sesi DB, ganti cookie demo) | ✅ | `POST /api/admin/login|logout`, `GET /api/admin/me` (2026-09-30) |
 | S14 | Index hot-path + connection pool DB | ✅ | Migrasi `0003` (11 index: cron, riwayat, grid, OTP, log) + `max: 5` di `src/db/index.ts` (2026-11-10) |
-| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (5 file, ±70 request), guard DB test + localhost, `npm run test:api` (2026-11-10; file akun 2026-11-15; guard privasi + unit jendela check-in 2026-11-17) |
+| S15 | Test HTTP otomatis (vitest, serial) | ✅ | `tests/api/*` (6 file, ±80 request), guard DB test + localhost, `npm run test:api` (2026-11-10; file akun 2026-11-15; guard privasi + unit jendela check-in + unit QR 2026-11-17) |
 | S16 | Polling jadwal hemat (cache + versi + delta 304) | ✅ | `src/lib/slot-status.ts`, `GET /api/slots/status`, `getDaySchedule` 1 roundtrip, strip minggu 1 request (2026-11-10) |
 | S17 | Auth pemain email + password (ganti OTP) | ✅ | [ADR 0009](docs/06-adr/0009-akun-email-password.md): `/api/auth/register|login|logout|me`, `user_sessions` (token opaque + SHA-256), halaman `/login` + `/daftar`, sesi `padel_session` berbasis `userId` (2026-11-12) |
 | S18 | User bayangan walk-in + cron anonimisasi 7 hari | ✅ | [ADR 0011](docs/06-adr/0011-user-bayangan-walkin.md): `users.isGuest`, `anonymizedAt`, `/api/cron/anonymize`, dedupe guest by HP (2026-11-12) |
@@ -35,8 +35,9 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S22 | Halaman admin akun pemain + reset password | ✅ | `/admin/users`, `GET /api/admin/users?q=`, `POST /api/admin/users/:id/reset-password` (2026-11-15) |
 | S23 | Rate-limit persisten lintas-instance | ✅ | [ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md): tabel `rate_limits`, migrasi `0005`, `src/lib/rate-limit-db.ts`; endpoint sensitif memakainya (2026-11-15) |
 | S24 | Jadwal cron produksi + CI | ✅ | `vercel.json` (`/api/cron/expire` tiap 5 mnt, `/api/cron/anonymize` harian 03:00 UTC), `.github/workflows/ci.yml` (2026-11-15) |
-| S25 | QR tiket asli + scanner kamera gate | ✅ | `qrcode.react` di `QRBox` (payload kode booking, level M); `jsqr` mendekode frame kamera di `/admin/scanner` (~8 fps, dedupe 8 dtk, pilih kamera, fallback manual) (2026-11-17) |
+| S25 | QR tiket asli + scanner kamera gate | ✅ | `qrcode.react` di `QRBox` (payload token bertanda tangan sejak S27); `jsqr` mendekode frame kamera di `/admin/scanner` (~8 fps, dedupe 8 dtk, pilih kamera, fallback manual) (2026-11-17) |
 | S26 | Jendela check-in hari-H + bunyi gate | ✅ | `src/lib/checkin-window.ts` (WIB, buka H-30 mnt, tutup saat sesi berakhir) dipakai `POST /api/admin/checkin` (409); scanner menampilkan pesan spesifik + tone sukses/gagal (bisa dimatikan) (2026-11-17) |
+| S27 | QR bertanda tangan + log pemindaian gate | ✅ | [ADR 0014](docs/06-adr/0014-qr-tiket-bertanda-tangan.md): HMAC-SHA256 TTL 5 mnt (`TICKET_QR_SECRET`), verifikasi `?qr=` (403), tabel `scan_logs` + `GET /api/admin/scans`, migrasi `0006` (2026-11-17) |
 
 ## Fitur MVP — Sisi Customer
 
@@ -158,7 +159,7 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **57 test lulus (4 
 - **`GET /api/bookings/{code}`:** pemilik 200 (nomor HP tetap ternormalisasi); tanpa sesi 401; akun pemain lain 403 (`Anda bukan pemilik booking ini`); admin tetap bisa semua.
 - **Tiket:** tanpa sesi 401 (sebelum lookup kode); kode asing via sesi admin tetap 404.
 - **Admin users:** reset password user bayangan (`isGuest`) 409; alur walk-in membuat user bayangan seperti sebelumnya.
-- **Anggaran request:** naik dari ±60 ke ±70 per run (file `03-guards` 15, `04-account` 18).
+- **Anggaran request:** naik dari ±60 ke ±80 per run (file `03-guards` 15, `04-account` 18, QR tiket +2).
 
 ## Uji QR & Scanner Kamera (2026-11-17)
 
@@ -173,6 +174,16 @@ Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **67 test lulus (5 
 - **Unit (`05-checkin-window`, 8 test):** buka tepat H-30 menit; tolak 1 detik sebelum buka; terima saat sesi berjalan; tolak tepat saat sesi berakhir; tolak tanggal lain (`hari-H` / `sudah berakhir`); perhitungan WIB (10:00 UTC = 17:00 WIB belum dibuka); jam kosong/tanggal invalid; jam tidak berurutan memakai min/max.
 - **HTTP (`02-admin-flow`):** check-in booking +45 hari → 409 `hari-H`; walk-in hari ini pada slot kosong yang belum lewat → 200 + `checkedInBy`; check-in ganda → `already: true`. Jalur sukses dilewati otomatis bila tes dijalankan di luar jam operasional WIB.
 - **Scanner:** pesan 409 API diteruskan sebagai "Di luar jadwal check-in"; bunyi gate dua nada (lolos) / nada rendah (ditolak) dengan tombol aktif/nonaktif.
+
+## Uji QR Bertanda Tangan & Log Gate (2026-11-17)
+
+Dijalankan terhadap `npm run dev:test` (port 3100) + DB uji. **79 test lulus (6 file).** `lint`, `typecheck`, `build` hijau.
+
+- **Unit (`06-ticket-qr`, 9 test):** sign/verify valid; kode lowercase dinormalisasi; signature diubah → `signature`; kode lain → `code`; token kedaluwarsa → `expired`; secret berbeda → `signature`; payload sampah/versi salah → `format`; parse kode+expiry; extract kode dari token/URL/kode polos.
+- **HTTP (`01-customer-flow`):** respons tiket memuat `qrPayload`/`qrExpiresAt`; `?qr=` valid → 200; expiry digeser tanpa tanda tangan ulang → 403 `tidak valid`.
+- **HTTP (`02-admin-flow`):** check-in +45 hari dan check-in sukses menulis `scan_logs`; `GET /api/admin/scans?limit=5` mengembalikan log dengan outcome valid.
+- **UI:** halaman tiket merotasi QR tiap ±4 menit + saat tab aktif; scanner kamera hanya menerima token bertanda tangan, sedangkan input manual tetap kode polos; riwayat dimuat dari server dan bertahan setelah reload.
+- **Batas uji:** scan kamera fisik & screenshot tetap perlu uji manual di browser. Screenshot masih berlaku sampai TTL 5 menit (lihat ADR 0014).
 
 ## Uji Akhir Batch 4–7 (sekaligus)
 
@@ -203,7 +214,7 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 
 ### Uji otomatis
 - Jalankan: `cp .env.test.example .env.test` → `npm run db:migrate:test && npm run db:seed:test` → `npm run dev:test` (terminal 1) → `npm run test:api` (terminal 2).
-- Serial (1 worker), ±70 request per run, tanpa load/stress test. Cleanup hanya menghapus baris nomor HP test + closure `TEST-*`.
+- Serial (1 worker), ±80 request per run, tanpa load/stress test. Cleanup hanya menghapus baris nomor HP test + closure `TEST-*` + `scan_logs` milik booking test.
 - Guard: tolak `TEST_BASE_URL` non-lokal, tolak DB yang sama dengan `.env`, dan butuh nama DB ber-`test` atau `TEST_DB_CONFIRMED="1"`.
 
 ### Kesiapan produksi (belum selesai)

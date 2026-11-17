@@ -2,7 +2,7 @@
 
 > Referensi teknis untuk seluruh endpoint backend (`src/app/api/`).
 > Spesifikasi mesin-terbaca: [`07-api-backend.openapi.yaml`](07-api-backend.openapi.yaml) (impor ke Postman / Swagger UI).
-> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.4-checkin` (jendela check-in hari-H 2026-11-17).**
+> Versi dokumen mengikuti batch backend, format `1.0-batchN`. **Versi saat ini: `1.5-qr` (QR bertanda tangan + log pemindaian 2026-11-17).**
 > Source of truth implementasi tetap kode di `src/app/api/` + skema `src/db/schema.ts`.
 
 ## Isi Dokumen
@@ -91,6 +91,7 @@ Gagal:
 | `POST /api/auth/change-password` | 10 percobaan / user | 60 detik |
 | `POST /api/bookings` | 10/mnt per user + maks 3 booking aktif per akun (PRD Q8) | 60 detik |
 | `POST /api/admin/checkin` | 30 percobaan / admin | 60 detik |
+| `GET /api/admin/scans` | 120 percobaan / admin | 60 detik |
 
 Implementasi: endpoint sensitif (auth, booking, check-in) memakai `src/lib/rate-limit-db.ts` — tabel Postgres `rate_limits`, fixed-window, konsisten lintas-instance ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)). Endpoint jadwal (`/api/slots`, `/api/slots/status`) tetap memakai `src/lib/rate-limit.ts` (in-memory) karena di-polling sering. Batas booking aktif diperiksa di transaksi booking. Baris `rate_limits` lama dibersihkan oleh cron kedaluwarsa.
 
@@ -489,13 +490,15 @@ curl -H 'x-cron-secret: dev-cron-secret-lokal' http://localhost:3100/api/cron/ex
 
 ## 5d. Endpoint Tiket & Check-in
 
-> F5 — Tiket/bukti booking digital. Tiket **wajib login**: pemain hanya boleh membuka tiket miliknya sendiri (kode unik saja tidak cukup), admin bersesi boleh membuka semua tiket untuk scanner gate. Check-in hanya oleh admin bersesi (halaman tiket tidak boleh men-toggle sendiri).
+> F5 — Tiket/bukti booking digital. Tiket **wajib login**: pemain hanya boleh membuka tiket miliknya sendiri (kode unik saja tidak cukup), admin bersesi boleh membuka semua tiket untuk scanner gate. Check-in hanya oleh admin bersesi (halaman tiket tidak boleh men-toggle sendiri). QR memakai token bertanda tangan + rotasi pendek ([ADR 0014](06-adr/0014-qr-tiket-bertanda-tangan.md)).
 
 ### 5d.1 `GET /api/tickets/:kode` — tiket (wajib login/pemilik)
 
-Memuat seluruh field tiket (AC F5: kode, nama & HP, lapangan, tanggal, jam, durasi implisit dari `hours`, total, status) + `paymentStatus`/`paidAt` + `checkedInAt`/`checkedInBy` + `closureNotice` (pemberitahuan bila jadwal ketiban penutupan/Tutup; Batal ditandai via `status: dibatalkan`).
+Memuat seluruh field tiket (AC F5: kode, nama & HP, lapangan, tanggal, jam, durasi implisit dari `hours`, total, status) + `paymentStatus`/`paidAt` + `checkedInAt`/`checkedInBy` + `closureNotice` (pemberitahuan bila jadwal ketiban penutupan/Tutup; Batal ditandai via `status: dibatalkan`) + `qrPayload`/`qrExpiresAt` (token QR bertanda tangan, berlaku 5 menit).
 
 **Akses:** sesi `padel_session` milik `booking.userId` **atau** sesi admin. Tanpa sesi → `401`; sesi pemain lain → `403`.
+
+**Mode scanner:** tambahkan query `?qr=<payload>`. Server memverifikasi HMAC, kecocokan kode, dan masa berlaku; token palsu/kedaluwarsa → `403` dengan pesan `QR tiket tidak valid...` / `QR tiket sudah kedaluwarsa...`. Tanpa query `qr`, tiket tetap bisa dibuka pemilik/admin untuk menampilkan QR baru (input manual scanner juga memakai kode saja).
 
 ```bash
 curl http://localhost:3100/api/tickets/PD-YTZE3G -b cust.txt
@@ -506,6 +509,8 @@ curl http://localhost:3100/api/tickets/PD-YTZE3G -b cust.txt
   "ok": true,
   "ticket": {
     "code": "PD-YTZE3G",
+    "qrPayload": "v1.PD-YTZE3G.1764000000.5mS3...",
+    "qrExpiresAt": "2026-11-17T10:05:00.000Z",
     "courtId": 2,
     "courtName": "Lapangan 2",
     "description": "Outdoor, pasir sintetis",
@@ -531,6 +536,7 @@ curl http://localhost:3100/api/tickets/PD-YTZE3G -b cust.txt
 |---|---|---|
 | Tanpa sesi | 401 | `Masuk ke akun terlebih dahulu` |
 | Bukan pemilik | 403 | `Anda bukan pemilik tiket ini` |
+| QR palsu/kedaluwarsa | 403 | `QR tiket tidak valid. Gunakan QR terbaru dari halaman tiket.` |
 | Tidak ada | 404 | `Tiket tidak ditemukan` |
 
 Halaman `/tiket/[kode]` mengarahkan `401` ke `/login?next=/tiket/[kode]` dan menampilkan pesan khusus untuk `403`.
@@ -567,6 +573,41 @@ curl -X POST http://localhost:3100/api/admin/checkin \
 | Bukan hari-H | 409 | `Tiket ini untuk 2026-11-18; check-in hanya pada hari-H.` |
 | Terlalu awal | 409 | `Check-in dibuka 17:30 WIB (30 menit sebelum sesi 18:00–20:00 WIB).` |
 | Sesi berakhir | 409 | `Sesi 18:00–20:00 WIB sudah berakhir.` |
+
+Setiap panggilan (sukses/`already`/ditolak) menulis audit best-effort ke tabel `scan_logs` (`outcome: ok|already|rejected`, `reason`, admin, kode). Kegagalan menulis log tidak menggagalkan check-in.
+
+### 5d.3 `GET /api/admin/scans` — riwayat pemindaian gate
+
+**Perlu sesi admin.** Rate-limit 120/menit per admin. `limit` opsional 1–50 (default 20), urut terbaru.
+
+```bash
+curl 'http://localhost:3100/api/admin/scans?limit=20' -b cookies.txt
+```
+
+```json
+{
+  "ok": true,
+  "scans": [
+    {
+      "id": 42,
+      "code": "PD-YTZE3G",
+      "customerName": "Raka Uji2",
+      "courtName": "Lapangan 2",
+      "outcome": "ok",
+      "reason": "Check-in gate",
+      "adminUsername": "admin",
+      "createdAt": "2026-11-17T10:02:11.000Z"
+    }
+  ]
+}
+```
+
+| Error | Kode | Contoh `message` |
+|---|---|---|
+| Tanpa sesi | 401 | `Unauthorized` |
+| Terlalu sering | 429 | `Terlalu banyak percobaan, coba lagi sebentar` |
+
+Penolakan sisi klien sebelum API check-in (batal, belum lunas, duplikat scan) tidak masuk tabel ini.
 
 ---
 
@@ -1076,6 +1117,7 @@ Ganti password mandiri (§5a.5, `/akun`, [ADR 0012](06-adr/0012-ganti-password-m
 | `1.2-akun` | 2026-11-15 | **Akun + operasional:** sesi pemain pakai token acak + hash SHA-256 (bukan HMAC); `POST /api/auth/change-password` (§5a.5) + halaman `/akun`; `GET /api/admin/users` + `POST /api/admin/users/:id/reset-password` + halaman `/admin/users` (§7d); `GET /api/tickets/:kode` wajib login + pemilik (401/403, §5d.1); rate-limit endpoint sensitif pindah ke tabel Postgres `rate_limits`; jadwal Vercel Cron di `vercel.json` (§5c.4, §7c.1). Mengikuti ADR 0012–0013. |
 | `1.3-privasi` | 2026-11-17 | **Privasi booking:** `GET /api/bookings/:code` tidak lagi publik — wajib sesi, pemain hanya pemilik (401/403), admin boleh semua (§5b.2 + OpenAPI). Test guard privasi ditambah (tiket tanpa sesi 401, guest reset 409). |
 | `1.4-checkin` | 2026-11-17 | **Jendela check-in gate:** `POST /api/admin/checkin` hanya hari-H (WIB), buka 30 menit sebelum jam pertama, tutup saat sesi terakhir berakhir; di luar jendela → 409 dengan pesan spesifik (§5d.2 + OpenAPI). Logika `src/lib/checkin-window.ts`; unit test + HTTP 409/sukses. |
+| `1.5-qr` | 2026-11-17 | **QR bertanda tangan + audit gate:** `GET /api/tickets/:kode` mengembalikan `qrPayload`/`qrExpiresAt` (HMAC-SHA256, TTL 5 menit) dan memverifikasi `?qr=` (403 bila palsu/kedaluwarsa) (§5d.1); `POST /api/admin/checkin` menulis `scan_logs`; endpoint baru `GET /api/admin/scans` untuk riwayat persist (§5d.3). Migrasi `0006`. Mengikuti ADR 0014. |
 
 ---
 
