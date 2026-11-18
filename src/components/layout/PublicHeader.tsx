@@ -16,12 +16,10 @@ const NAV = [
   { href: "/booking", label: "Jadwal & Booking" },
   { href: "/tiket", label: "Cek Tiket" },
   { href: "/riwayat", label: "Riwayat" },
-  { href: "/akun", label: "Akun" },
 ];
 
 function isActivePath(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
-  if (href === "/admin") return pathname === "/admin" || pathname.startsWith("/admin/");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

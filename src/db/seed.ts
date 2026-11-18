@@ -94,38 +94,44 @@ async function main() {
 
   // Akun pemain demo (login email + password, ADR 0009). Idempotent by email;
   // password hanya ditimpa bila SEED_DEMO_RESET_PASSWORD=1.
-  const demoPassword = process.env.SEED_DEMO_PASSWORD ?? 'pemain123';
-  if (demoPassword.length < MIN_PASSWORD_LENGTH) {
-    console.error(`seed user gagal: SEED_DEMO_PASSWORD minimal ${MIN_PASSWORD_LENGTH} karakter`);
-    process.exit(1);
-  }
-  const resetDemoPassword = process.env.SEED_DEMO_RESET_PASSWORD === '1';
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO_ENABLE !== '1') {
+    console.log(
+      'seed user: dilewati di produksi (set SEED_DEMO_ENABLE=1 bila akun demo memang diinginkan)',
+    );
+  } else {
+    const demoPassword = process.env.SEED_DEMO_PASSWORD ?? 'pemain123';
+    if (demoPassword.length < MIN_PASSWORD_LENGTH) {
+      console.error(`seed user gagal: SEED_DEMO_PASSWORD minimal ${MIN_PASSWORD_LENGTH} karakter`);
+      process.exit(1);
+    }
+    const resetDemoPassword = process.env.SEED_DEMO_RESET_PASSWORD === '1';
 
-  for (const demo of DEMO_USERS) {
-    const email = demo.email.trim().toLowerCase();
-    const foundUser = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, email))
-      .limit(1);
+    for (const demo of DEMO_USERS) {
+      const email = demo.email.trim().toLowerCase();
+      const foundUser = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, email))
+        .limit(1);
 
-    if (foundUser.length === 0) {
-      await db.insert(users).values({
-        name: demo.name,
-        email,
-        phone: normalizePhone(demo.phone),
-        passwordHash: await hashPassword(demoPassword),
-        isGuest: false,
-      });
-      console.log(`seed user: ${email} OK`);
-    } else if (resetDemoPassword) {
-      await db
-        .update(users)
-        .set({ passwordHash: await hashPassword(demoPassword), updatedAt: new Date() })
-        .where(eq(users.id, foundUser[0].id));
-      console.log(`seed user: ${email} password direset`);
-    } else {
-      console.log(`seed user: ${email} sudah ada, dilewati`);
+      if (foundUser.length === 0) {
+        await db.insert(users).values({
+          name: demo.name,
+          email,
+          phone: normalizePhone(demo.phone),
+          passwordHash: await hashPassword(demoPassword),
+          isGuest: false,
+        });
+        console.log(`seed user: ${email} OK`);
+      } else if (resetDemoPassword) {
+        await db
+          .update(users)
+          .set({ passwordHash: await hashPassword(demoPassword), updatedAt: new Date() })
+          .where(eq(users.id, foundUser[0].id));
+        console.log(`seed user: ${email} password direset`);
+      } else {
+        console.log(`seed user: ${email} sudah ada, dilewati`);
+      }
     }
   }
 

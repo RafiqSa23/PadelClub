@@ -9,18 +9,12 @@ import { Field, TextInput } from "@/components/ui/Input";
 import { MIcon } from "@/components/ui/MIcon";
 import { IconAlert, IconCheckCircle, IconShield } from "@/components/ui/icons";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-constants";
+import type { SessionUser } from "@/lib/session-types";
 import { invalidateCurrentUser } from "@/lib/use-current-user";
-
-interface Me {
-  id: number;
-  name: string;
-  email: string | null;
-  phone: string | null;
-}
 
 export default function AkunPage() {
   const router = useRouter();
-  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const [me, setMe] = useState<SessionUser | null | undefined>(undefined);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -40,7 +34,7 @@ export default function AkunPage() {
           router.push("/login?next=/akun");
           return;
         }
-        const json = (await res.json()) as { ok: boolean; user?: Me };
+        const json = (await res.json()) as { ok: boolean; user?: SessionUser };
         setMe(json.ok && json.user ? json.user : null);
       } catch {
         if (!cancelled) setMe(null);

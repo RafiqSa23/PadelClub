@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-export interface SessionUser {
-  id: number;
-  name: string;
-  email: string | null;
-  phone: string | null;
-}
+import type { SessionUser } from "@/lib/session-types";
 
 /**
  * Status sesi pemain untuk UI (navbar). `undefined` = belum diketahui,
@@ -27,11 +21,15 @@ export function useCurrentUser(): SessionUser | null | undefined {
 
   useEffect(() => {
     let cancelled = false;
+    // Nomor urut request: respons lama (mis. sebelum logout) tidak boleh
+    // menimpa hasil request terbaru.
+    let requestId = 0;
 
     async function load() {
+      const id = ++requestId;
       try {
         const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (cancelled) return;
+        if (cancelled || id !== requestId) return;
         if (res.status === 401) {
           setUser(null);
           return;
@@ -39,9 +37,10 @@ export function useCurrentUser(): SessionUser | null | undefined {
         const json = (await res.json().catch(() => null)) as
           | { ok?: boolean; user?: SessionUser }
           | null;
+        if (cancelled || id !== requestId) return;
         setUser(json?.ok && json.user ? json.user : null);
       } catch {
-        if (!cancelled) setUser(null);
+        if (!cancelled && id === requestId) setUser(null);
       }
     }
 

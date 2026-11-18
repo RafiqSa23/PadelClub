@@ -136,9 +136,10 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - Retensi audit gate (ADR 0015): `scan_logs` dipangkas di cron anonimisasi harian; default 90 hari, env `SCAN_LOG_RETENTION_DAYS` dijepit 7–365. Respons cron menambah `scanLogsDeleted`/`scanLogRetentionDays`.
 
 **Selesai 2026-11-18:**
-- Seed 2 akun pemain demo (`pemain@padelclub.test`, `pemain2@padelclub.test`) — lihat Catatan Operasional.
-- Navbar publik sadar-sesi (`useCurrentUser`): tombol kanan/drawer berubah "Masuk" → "Akun" setelah login.
-- Tombol **Keluar** di `/akun` memanggil `POST /api/auth/logout` (hapus sesi DB + cookie), lalu reload ke beranda.
+- Seed 2 akun pemain demo (`pemain@padelclub.test`, `pemain2@padelclub.test`) — lihat Catatan Operasional. Di produksi akun demo dilewati kecuali `SEED_DEMO_ENABLE=1`.
+- Navbar publik sadar-sesi (`useCurrentUser`): tombol kanan/drawer berubah "Masuk" → "Akun" setelah login. Item "Akun" dihapus dari menu `NAV` (duplikat); `/akun` diakses lewat tombol sesi.
+- Tombol **Keluar** di `/akun` memanggil `POST /api/auth/logout` (hapus sesi DB + cookie), lalu kembali ke beranda dengan sinyal `invalidateCurrentUser()`.
+- Perapian: race respons `/api/auth/me` dijaga nomor urut request; tipe `SessionUser` dipakai bersama (`src/lib/session-types.ts`); cleanup `scan_logs` menghitung via `count(*)` sebelum delete.
 
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 

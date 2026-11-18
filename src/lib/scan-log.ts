@@ -1,4 +1,4 @@
-import { lt } from "drizzle-orm";
+import { lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { scanLogs } from "@/db/schema";
 import { scanLogCutoff, scanLogRetentionDays } from "@/lib/scan-log-retention";
@@ -42,11 +42,18 @@ export async function cleanupScanLogs(
   retentionDays: number = scanLogRetentionDays(),
 ): Promise<number> {
   try {
-    const deleted = await db
-      .delete(scanLogs)
-      .where(lt(scanLogs.createdAt, scanLogCutoff(retentionDays)))
-      .returning({ id: scanLogs.id });
-    return deleted.length;
+    const cutoff = scanLogCutoff(retentionDays);
+    // Hitung dulu (satu agregat, bukan memuat semua id) lalu hapus. Cron harian
+    // dan delete bersifat idempotent, jadi celah balapan insert tidak masalah.
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(scanLogs)
+      .where(lt(scanLogs.createdAt, cutoff));
+    const count = row?.count ?? 0;
+    if (count === 0) return 0;
+
+    await db.delete(scanLogs).where(lt(scanLogs.createdAt, cutoff));
+    return count;
   } catch (error) {
     console.error("[scan-log] gagal membersihkan log lama", error);
     return 0;
