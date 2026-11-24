@@ -81,13 +81,34 @@ async function main() {
   }
   console.log('seed court_hours: 7 hari per lapangan OK');
 
-  // Admin default (idempotent by username). Password dari env atau admin123.
+  // Admin default (idempotent by username). Di produksi password wajib eksplisit
+  // dan bukan default — tanpa guard, situs publik bisa jalan dengan admin/admin123.
   const username = process.env.SEED_ADMIN_USER ?? 'admin';
   const password = process.env.SEED_ADMIN_PASSWORD ?? 'admin123';
   const found = await db.select().from(admins).where(eq(admins.username, username)).limit(1);
+  const resetPassword = process.env.SEED_ADMIN_RESET_PASSWORD === '1';
+  const willWrite = found.length === 0 || resetPassword;
+  if (willWrite && process.env.NODE_ENV === 'production') {
+    if (!process.env.SEED_ADMIN_PASSWORD) {
+      console.error('seed admin gagal: SEED_ADMIN_PASSWORD wajib diisi saat NODE_ENV=production');
+      process.exit(1);
+    }
+    if (password === 'admin123' || password.length < MIN_PASSWORD_LENGTH) {
+      console.error(
+        `seed admin gagal: SEED_ADMIN_PASSWORD minimal ${MIN_PASSWORD_LENGTH} karakter dan bukan "admin123"`,
+      );
+      process.exit(1);
+    }
+  }
   if (found.length === 0) {
     await db.insert(admins).values({ username, passwordHash: await hashAdminPassword(password) });
     console.log(`seed admin: ${username} OK`);
+  } else if (resetPassword) {
+    await db
+      .update(admins)
+      .set({ passwordHash: await hashAdminPassword(password) })
+      .where(eq(admins.id, found[0].id));
+    console.log(`seed admin: ${username} password direset`);
   } else {
     console.log(`seed admin: ${username} sudah ada, dilewati`);
   }

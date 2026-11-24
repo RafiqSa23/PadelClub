@@ -472,7 +472,7 @@ curl -X POST http://localhost:3100/api/webhooks/payment \
 
 ### 5c.4 `GET /api/cron/expire` — kedaluwarsakan booking > 15 mnt
 
-Perlu `CRON_SECRET` (header `x-cron-secret`, `Authorization: Bearer`, atau query `?secret=`). Dijadwalkan oleh `vercel.json` **setiap 5 menit** (`*/5 * * * *`); bila deploy non-Vercel, daftarkan jadwal yang sama di scheduler eksternal ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)). Tiap booking kedaluwarsa: `menunggu_pembayaran → dibatalkan`, payment `pending → expired`, log `kadaluarsa` — slot kembali `kosong` otomatis. Route ini juga membersihkan baris `rate_limits` yang sudah basi.
+Perlu `CRON_SECRET` (header `x-cron-secret`, `Authorization: Bearer`, atau query `?secret=`). Di Vercel Hobby `vercel.json` menjadwalkannya **sekali sehari** (02:00 UTC) karena Hobby menolak ekspresi lebih sering; pemicu **tiap 5 menit** berasal dari GitHub Actions (`.github/workflows/cron-expire.yml`). Bila deploy non-Vercel, daftarkan jadwal yang sama di scheduler eksternal ([ADR 0013](06-adr/0013-rate-limit-cron-produksi.md)). Tiap booking kedaluwarsa: `menunggu_pembayaran → dibatalkan`, payment `pending → expired`, log `kadaluarsa` — slot kembali `kosong` otomatis. Route ini juga membersihkan baris `rate_limits` yang sudah basi.
 
 ```bash
 curl -H 'x-cron-secret: dev-cron-secret-lokal' http://localhost:3100/api/cron/expire
@@ -1121,6 +1121,7 @@ Ganti password mandiri (§5a.5, `/akun`, [ADR 0012](06-adr/0012-ganti-password-m
 | `1.4-checkin` | 2026-11-17 | **Jendela check-in gate:** `POST /api/admin/checkin` hanya hari-H (WIB), buka 30 menit sebelum jam pertama, tutup saat sesi terakhir berakhir; di luar jendela → 409 dengan pesan spesifik (§5d.2 + OpenAPI). Logika `src/lib/checkin-window.ts`; unit test + HTTP 409/sukses. |
 | `1.5-qr` | 2026-11-17 | **QR bertanda tangan + audit gate:** `GET /api/tickets/:kode` mengembalikan `qrPayload`/`qrExpiresAt` (HMAC-SHA256, TTL 5 menit) dan memverifikasi `?qr=` (403 bila palsu/kedaluwarsa) (§5d.1); `POST /api/admin/checkin` menulis `scan_logs`; endpoint baru `GET /api/admin/scans` untuk riwayat persist (§5d.3). Migrasi `0006`. Mengikuti ADR 0014. |
 | `1.6-hardening` | 2026-11-17 | **Header keamanan + retensi audit:** semua respons memuat CSP terbatas (`frame-ancestors 'none'`), `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, dan HSTS hanya di produksi; `X-Powered-By` dihapus. `GET /api/cron/anonymize` kini juga menghapus `scan_logs` lebih tua dari retensi (default 90 hari, `SCAN_LOG_RETENTION_DAYS`) dan mengembalikan `scanLogsDeleted`/`scanLogRetentionDays` (§7c.1). Mengikuti ADR 0015. |
+| `1.7-hosting` | 2026-11-24 | **Jadwal cron untuk Vercel Hobby:** `vercel.json` menurunkan `/api/cron/expire` ke harian (02:00 UTC) karena Hobby menolak ekspresi lebih sering; pemicu 5 menit dipindah ke GitHub Actions (`.github/workflows/cron-expire.yml`, butuh repo variable `CRON_TARGET_URL` + secret `CRON_SECRET`). Tanpa perubahan kontrak endpoint; seed admin menolak password default saat `NODE_ENV=production`. |
 
 ---
 

@@ -1,0 +1,32 @@
+name: Cron expire
+
+# Vercel Hobby hanya mengizinkan cron harian, jadi booking `menunggu_pembayaran`
+# yang lewat 15 menit dibereskan dari sini tiap 5 menit (gratis, bisa telat
+# beberapa menit bila GitHub sibuk). Alternatif: paket Pro atau cron-job.org.
+#
+# Butuh repo secret CRON_SECRET (sama dengan env Vercel) dan repo variable
+# CRON_TARGET_URL (mis. https://padelclub.vercel.app). Tanpa CRON_TARGET_URL
+# job dilewati; tanpa CRON_SECRET endpoint membalas 401 dan job gagal.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  expire:
+    name: Panggil /api/cron/expire
+    runs-on: ubuntu-latest
+    if: vars.CRON_TARGET_URL != ''
+    steps:
+      - name: Trigger cron
+        env:
+          CRON_TARGET_URL: ${{ vars.CRON_TARGET_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          url="${CRON_TARGET_URL%/}/api/cron/expire"
+          code=$(curl -sS -o /tmp/body.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" "$url")
+          echo "HTTP $code"
+          cat /tmp/body.json
+          test "$code" = "200"

@@ -1,15 +1,17 @@
 openapi: 3.1.0
 info:
   title: Padel Court Booking — Backend API
-  version: 1.6-hardening
+  version: 1.7-hosting
   description: >-
     API backend Sistem Penyewaan Lapangan Padel (Next.js Route Handlers +
     Drizzle ORM + Neon PostgreSQL). Dokumen manusia: docs/07-api-backend.md.
-    Versi 1.6-hardening = revisi 2026-11-17: header keamanan global (CSP
-    terbatas, HSTS produksi) + retensi scan_logs 90 hari di cron anonymize
-    (ADR 0015). Sebelumnya 1.5-qr: QR tiket bertanda tangan (HMAC, TTL 5
-    menit), verifikasi ?qr= di endpoint tiket, log pemindaian persist + endpoint
-    GET /admin/scans (ADR 0014); jendela check-in hari-H (WIB).
+    Versi 1.7-hosting = revisi 2026-11-24: jadwal cron menyesuaikan Vercel
+    Hobby (expire harian di vercel.json + pemicu 5 menit dari GitHub Actions);
+    tidak ada perubahan kontrak endpoint. Sebelumnya 1.6-hardening: header
+    keamanan global (CSP terbatas, HSTS produksi) + retensi scan_logs 90 hari
+    di cron anonymize (ADR 0015). Sebelumnya 1.5-qr: QR tiket bertanda tangan
+    (HMAC, TTL 5 menit), verifikasi ?qr= di endpoint tiket, log pemindaian
+    persist + endpoint GET /admin/scans (ADR 0014); jendela check-in hari-H (WIB).
 summary: API backend MVP Padel Court Booking
 servers:
   - url: /api
@@ -1395,8 +1397,9 @@ paths:
       summary: Kedaluwarsakan menunggu_pembayaran > 15 mnt (F4, ADR 0006)
       operationId: expireBookings
       description: >-
-        Dijadwalkan Vercel Cron setiap 5 menit (vercel.json). Juga membersihkan
-        baris rate_limits yang sudah basi (ADR 0013).
+        Dijadwalkan Vercel Cron sekali sehari (vercel.json, batas Vercel Hobby)
+        dan dipicu tiap 5 menit oleh GitHub Actions (cron-expire.yml). Juga
+        membersihkan baris rate_limits yang sudah basi (ADR 0013).
       parameters:
         - name: secret
           in: query

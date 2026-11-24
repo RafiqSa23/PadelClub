@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/expire", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/expire", "schedule": "0 2 * * *" },
     { "path": "/api/cron/anonymize", "schedule": "0 3 * * *" }
   ]
 }

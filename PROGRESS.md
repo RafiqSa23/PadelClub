@@ -34,7 +34,7 @@ Checklist pemantauan implementasi. Sinkron dengan:
 | S21 | Ganti password mandiri + halaman `/akun` | ✅ | [ADR 0012](docs/06-adr/0012-ganti-password-mandiri.md): `POST /api/auth/change-password`, `/akun`, sesi lain dicabut (2026-11-15) |
 | S22 | Halaman admin akun pemain + reset password | ✅ | `/admin/users`, `GET /api/admin/users?q=`, `POST /api/admin/users/:id/reset-password` (2026-11-15) |
 | S23 | Rate-limit persisten lintas-instance | ✅ | [ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md): tabel `rate_limits`, migrasi `0005`, `src/lib/rate-limit-db.ts`; endpoint sensitif memakainya (2026-11-15) |
-| S24 | Jadwal cron produksi + CI | ✅ | `vercel.json` (`/api/cron/expire` tiap 5 mnt, `/api/cron/anonymize` harian 03:00 UTC), `.github/workflows/ci.yml` (2026-11-15) |
+| S24 | Jadwal cron produksi + CI | ✅ | `vercel.json` (`/api/cron/expire` harian 02:00 UTC + `/api/cron/anonymize` harian 03:00 UTC), pemicu 5 menit `.github/workflows/cron-expire.yml`, `.github/workflows/ci.yml` (2026-11-15, cron disesuaikan 2026-11-24) |
 | S25 | QR tiket asli + scanner kamera gate | ✅ | `qrcode.react` di `QRBox` (payload token bertanda tangan sejak S27); `jsqr` mendekode frame kamera di `/admin/scanner` (~8 fps, dedupe 8 dtk, pilih kamera, fallback manual) (2026-11-17) |
 | S26 | Jendela check-in hari-H + bunyi gate | ✅ | `src/lib/checkin-window.ts` (WIB, buka H-30 mnt, tutup saat sesi berakhir) dipakai `POST /api/admin/checkin` (409); scanner menampilkan pesan spesifik + tone sukses/gagal (bisa dimatikan) (2026-11-17) |
 | S27 | QR bertanda tangan + log pemindaian gate | ✅ | [ADR 0014](docs/06-adr/0014-qr-tiket-bertanda-tangan.md): HMAC-SHA256 TTL 5 mnt (`TICKET_QR_SECRET`), verifikasi `?qr=` (403), tabel `scan_logs` + `GET /api/admin/scans`, migrasi `0006` (2026-11-17) |
@@ -119,7 +119,7 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 
 **P1 — sebelum produksi**
 - **Midtrans sandbox e2e belum diuji.** Butuh `MIDTRANS_SERVER_KEY`, `NEXT_PUBLIC_MIDTRANS_CLIENT_KEY` sandbox, `APP_PUBLIC_URL` publik (ngrok), dan webhook yang bisa menjangkau URL tersebut.
-- **Vercel Cron belum diverifikasi di deployment.** Set `CRON_SECRET` di Vercel; pastikan paket mengizinkan `*/5 * * * *` untuk `/api/cron/expire` (Hobby membatasi jadwal → expire bisa tertunda). Lokal hanya diuji lewat pemanggilan langsung.
+- **Vercel Cron belum diverifikasi di deployment.** Set `CRON_SECRET` di Vercel. Konfigurasi sudah disesuaikan untuk Hobby (2026-11-24): `vercel.json` expire **harian**, pemicu 5 menit lewat GitHub Actions (`.github/workflows/cron-expire.yml`, `CRON_TARGET_URL` + `CRON_SECRET`). Eksekusi nyata di Vercel/GitHub belum diuji.
 - **CI `api-tests` belum pernah jalan.** Job digerbangi `API_TESTS_ENABLED=1` + secret `TEST_DATABASE_URL`; belum diset di repo GitHub. Job `quality` (lint/typecheck/build) juga belum diverifikasi di runner.
 
 **P2 — setelah MVP stabil**
@@ -140,6 +140,14 @@ Daftar gap yang teridentifikasi setelah perapian frontend (2026-09-28), diperbar
 - Navbar publik sadar-sesi (`useCurrentUser`): tombol kanan/drawer berubah "Masuk" → "Akun" setelah login. Item "Akun" dihapus dari menu `NAV` (duplikat); `/akun` diakses lewat tombol sesi.
 - Tombol **Keluar** di `/akun` memanggil `POST /api/auth/logout` (hapus sesi DB + cookie), lalu kembali ke beranda dengan sinyal `invalidateCurrentUser()`.
 - Perapian: race respons `/api/auth/me` dijaga nomor urut request; tipe `SessionUser` dipakai bersama (`src/lib/session-types.ts`); cleanup `scan_logs` menghitung via `count(*)` sebelum delete.
+
+**Selesai 2026-11-24 (kesiapan deploy gratis):**
+- `vercel.json`: `/api/cron/expire` diturunkan ke harian `0 2 * * *` — Vercel Hobby menolak ekspresi lebih sering (deploy gagal). `/api/cron/anonymize` tetap harian 03:00 UTC.
+- `.github/workflows/cron-expire.yml` (baru): pemicu `*/5 * * * *` ke `/api/cron/expire` dengan `Authorization: Bearer ${{ secrets.CRON_SECRET }}`; butuh repo variable `CRON_TARGET_URL`.
+- `src/db/seed.ts`: saat `NODE_ENV=production` seed admin **menolak** `SEED_ADMIN_PASSWORD` kosong, `admin123`, atau < 8 karakter (mencegah `admin/admin123` di situs publik).
+- `.env.example`: tambah `DB_POOL_MAX`, catatan guard seed admin produksi.
+- `README.md`: bagian **Deploy Gratis (Vercel Hobby + Neon Free, pembayaran mock)**, tabel env lengkap, peringatan cron Hobby, daftar test 01–07, jumlah path OpenAPI (34).
+- `docs/07-api-backend.md` + OpenAPI `1.7-hosting`: jadwal cron diperbarui (tanpa perubahan kontrak endpoint).
 
 ## Uji Revisi Scope Auth & Notifikasi (2026-11-12)
 
@@ -244,7 +252,7 @@ Dilaksanakan 2026-09-30 terhadap dev server + Neon (pola Batch 1–3: contoh res
 
 ### Kesiapan produksi (belum selesai)
 - Notifikasi WhatsApp/Email & pengingat F6 ditunda ke v2.0 (PRD Q5) — tidak ada integrasi nyata di MVP.
-- Cron F4 (expire) & cron anonimisasi walk-in dijadwalkan `vercel.json` ([ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md)); host non-Vercel perlu scheduler eksternal dengan jadwal sama.
+- Cron F4 (expire) & cron anonimisasi walk-in dijadwalkan `vercel.json` ([ADR 0013](docs/06-adr/0013-rate-limit-cron-produksi.md)); pada Vercel Hobby expire hanya boleh harian, jadi pemicu 5 menit dijalankan `.github/workflows/cron-expire.yml`. Host non-Vercel perlu scheduler eksternal dengan jadwal sama.
 - Verifikasi email & **reset lupa password** mandiri belum ada (PRD Q7); reset via admin `/admin/users`, ganti password saat login lewat `/akun` ([ADR 0012](docs/06-adr/0012-ganti-password-mandiri.md)).
 - Kredensial Midtrans: isi hanya di `.env`; key yang pernah tertulis di `.env.example` wajib di-rotate di dashboard Midtrans.
 - Alur bayar Midtrans sandbox belum diuji end-to-end (butuh URL publik + key valid).
