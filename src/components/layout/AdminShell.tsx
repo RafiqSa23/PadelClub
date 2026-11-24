@@ -9,7 +9,6 @@ import { cn } from "@/lib/cn";
 import { Brand } from "./Brand";
 import { MIcon } from "@/components/ui/MIcon";
 import { ASSETS } from "@/lib/assets";
-import { ADMIN_SESSION_COOKIE } from "@/lib/constants";
 
 const PRIMARY_NAV = [
   { href: "/admin/jadwal", label: "Matrix Slot & Kasir", icon: "grid_view" },
@@ -67,8 +66,10 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
   const router = useRouter();
 
   function logout() {
-    document.cookie = `${ADMIN_SESSION_COOKIE}=; path=/; max-age=0`;
-    router.push("/admin");
+    void fetch("/api/admin/logout", { method: "POST" }).finally(() => {
+      router.push("/admin");
+      router.refresh();
+    });
   }
 
   return (
